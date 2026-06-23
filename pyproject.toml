@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "shunt"
+version = "2026062322"
+description = "transparent remote hands for an AI coding agent — redirects bash to a chosen remote host via a Claude Code hook"
+requires-python = ">=3.11"
+dependencies = []
+readme = "README.md"
+license = "MIT"
+authors = [
+  { name = "Alex Hristow" },
+]
+keywords = ["claude", "ai", "ssh", "remote", "hook", "agent"]
+classifiers = [
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX",
+]
+
+[project.scripts]
+shunt = "shunt.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Fever-Wits/shunt"
+Repository = "https://github.com/Fever-Wits/shunt"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shunt"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/shunt/systemd/shunt-daemon.service" = "shunt/systemd/shunt-daemon.service"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+ignore = ["E401", "E701", "E702", "E703", "E741"]

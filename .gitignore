@@ -1,0 +1,23 @@
+# secrets & runtime — never commit
+token
+token.*
+hosts
+target.*
+active-host.*
+*.sock
+audit.log
+*.env
+
+# python
+__pycache__/
+*.pyc
+
+# build artefacts
+dist/
+*.egg-info/
+build/
+
+# examples ARE tracked (different names): hosts.example
+
+# tooling caches
+.ruff_cache/
