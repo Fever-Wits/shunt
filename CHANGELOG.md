@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
+## [2026062407] — 2026-06-24
+
+### Added
+
+- **`checkout` / `commit`** — edit remote files with native local tools and push
+  back atomically. `checkout @host /path` pulls the file into a local sandbox and
+  records the SHA; `commit` writes it back, refusing if the remote changed since
+  checkout (optimistic SHA-lock). Supports `--list` and `--abandon`.
+
+### Fixed
+
+- File-descriptor leak in helper reads (checkout path cleanup on failure now
+  closes the output file before attempting `unlink`).
+
+### Security
+
+- Path-traversal guard on `checkout`: a remote path containing `..` that would
+  escape the `~/.config/shunt/checkouts/` sandbox is rejected before any ssh
+  call is made.
+
+---
+
 ## [2026062322] — 2026-06-23
 
 Initial public release. Transparent remote hands for an AI coding agent:

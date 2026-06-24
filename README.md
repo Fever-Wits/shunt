@@ -7,7 +7,9 @@ agent's bash commands to a chosen remote machine — the agent keeps running pla
 `ls`, `grep`, `make`, and each one executes on the host you've switched to, with
 per-session working directory kept across commands. Alongside the hook ships a small
 `shunt` CLI for the things bash alone can't do well over a wire: `read`, `edit`,
-`cp`, `bg`, `get`, and `log`.
+`cp`, `bg`, `get`, `log`, `checkout`, and `commit`.
+
+What you can do: **edit remote files** with your normal local tools · **run commands transparently** on a remote host · **long tasks** in the background with `bg` + `--status` to monitor.
 
 Two transports: **ssh** (secure — no open ports, no shared token) and **daemon**
 (a token-guarded TCP listener, only for a trusted LAN).
@@ -216,6 +218,22 @@ $ shunt log -n 20
 2026-06-23T10:15:02 sid=… host=web-01 :: hostname
 2026-06-23T10:15:09 sid=… host=web-01 :: make -j8 all
 ```
+
+### Edit remote files (`checkout` / `commit`)
+
+`checkout` pulls a remote file to a local sandbox so you can edit it with normal
+tools (Read, Edit, Write). `commit` pushes it back atomically with an optimistic
+SHA-lock — if the remote changed since your checkout it refuses, avoiding a
+blind overwrite.
+
+```bash
+shunt checkout @web-01 /opt/app/config.ini   # pulls file locally, prints local path
+# … edit with your usual tools …
+shunt commit                                  # pushes all pending checkouts back
+```
+
+- `shunt checkout --list` — show current checkouts (local path, remote `@host:/path`, base SHA).
+- `shunt checkout --abandon <local_path>` / `shunt commit --abandon <local_path>` — drop the manifest entry without pushing (local file stays on disk).
 
 ### `shunt install <user>@<host> [--mode secure|nonsecure] [--alias A] [--key PATH] [--port P]`
 
