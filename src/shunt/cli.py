@@ -21,10 +21,12 @@ shunt CLI (this file) = the special operations:
   shunt commit  [<local_path>]             push edited local file(s) back to remote (conflict-safe)
   shunt commit  --abandon <local_path>     drop manifest entry without pushing
 
-hosts (~/.config/shunt/hosts): `<alias> ssh <target> [key=...]`
-Everything travels over ssh — the only transport.
+hosts (~/.config/shunt/shunt.toml): see config.py — the legacy `hosts` file is still
+read when no shunt.toml exists. Everything goes through ssh, the only transport.
 """
 import sys, os, json, base64, shlex, subprocess, hashlib
+
+from shunt import config
 
 CONF = os.environ.get("SHUNT_CONF", os.path.expanduser("~/.config/shunt"))
 SELF_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -40,35 +42,26 @@ def die(msg, code=2):
     sys.exit(code)
 
 
-def resolve_host(alias):
-    alias = alias.lstrip("@")
+def load_hosts():
+    """All configured hosts; a broken config dies HERE, with the reason."""
     try:
-        with open(os.path.join(CONF, "hosts")) as f:
-            lines = f.read().splitlines()
-    except Exception:
-        die("no hosts config: %s/hosts" % CONF)
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        p = line.split()
-        # ssh is the only transport: a line naming anything else holds something that is
-        # not an ssh destination, and must not silently become a host
-        if len(p) >= 3 and p[0] == alias and p[1] == "ssh":
-            return {"alias": p[0], "target": p[2], "opts": p[3:]}
-    die("unknown host: %s" % alias)
+        return config.load_hosts(CONF)
+    except Exception as e:
+        die("cannot read the host config: %s" % e)
 
 
-def _key(host):
-    for o in host["opts"]:
-        if o.startswith("key="):
-            return os.path.expanduser(o[4:])
-    return None
+def resolve_host(alias):
+    """Alias → {'alias', 'target', 'key'}; dies when the alias is not configured."""
+    alias = alias.lstrip("@")
+    host = load_hosts().get(alias)
+    if not host:
+        die("unknown host: %s" % alias)
+    return host
 
 
 def ssh_argv(host):
     a = ["ssh"]
-    k = _key(host)
+    k = host["key"]
     if k:
         a += ["-i", k]
     a += ["-o", "StrictHostKeyChecking=accept-new", "-o", "ControlMaster=auto",
@@ -79,11 +72,17 @@ def ssh_argv(host):
 
 # ── subcommands ──────────────────────────────────────────────────────────────
 def cmd_hosts(argv):
-    try:
-        with open(os.path.join(CONF, "hosts")) as f:
-            sys.stdout.write(f.read())
-    except Exception:
-        die("no hosts config: %s/hosts" % CONF)
+    """The configured hosts, resolved — not the raw file, which may be either format."""
+    path = config.config_path(CONF)
+    if not path:
+        die("no host config: %s" % os.path.join(CONF, config.TOML_NAME))
+    hosts = load_hosts()
+    print("# " + path)
+    for alias, host in sorted(hosts.items()):
+        key = ("  key=" + host["key"]) if host["key"] else ""
+        print("%-12s %s%s" % (alias, host["target"], key))
+    if not hosts:
+        print("(no hosts configured)")
     return 0
 
 
@@ -148,7 +147,7 @@ def cmd_cp(argv):
     if not h:
         die("at least one side must be @host:/path")
     e = "ssh -o ControlPath=%s -o StrictHostKeyChecking=accept-new" % SOCK
-    k = _key(h)
+    k = h["key"]
     if k:
         e += " -i " + shlex.quote(k)
     return subprocess.run(["rsync", "-az", "--info=progress2", "-e", e, rsrc, rdst]).returncode
@@ -235,19 +234,6 @@ def cmd_get(argv):
     return subprocess.run(ssh_argv(host) + [remote]).returncode
 
 
-def _write_hosts_line(alias, line):
-    """hosts line (idempotent — replaces a line with the same alias)."""
-    os.makedirs(CONF, exist_ok=True)
-    hp = os.path.join(CONF, "hosts")
-    keep = []
-    if os.path.exists(hp):
-        keep = [l for l in open(hp).read().splitlines() if l.strip() and l.split()[0] != alias]
-    keep.append(line)
-    with open(hp, "w") as f:
-        f.write("\n".join(keep) + "\n")
-    print("✓ hosts line: %s" % line)
-
-
 def _print_hook_hint():
     """hook instruction (we do NOT touch someone else's settings.json automatically)."""
     print("\nTo activate, add to ~/.claude/settings.json → hooks.PreToolUse (if not already there):")
@@ -266,13 +252,14 @@ def cmd_install(argv):
     dest = argv[0]
     rest = argv[1:]
     alias = rest[rest.index("--alias") + 1] if "--alias" in rest else None
-    key = os.path.expanduser(rest[rest.index("--key") + 1]) if "--key" in rest else None
+    # written down as given (`~/…` travels between machines), expanded only for ssh here
+    key = rest[rest.index("--key") + 1] if "--key" in rest else None
     host_ip = dest.split("@", 1)[1]
     if not alias:
         alias = host_ip.replace(".", "-")
     sb = ["ssh", "-o", "StrictHostKeyChecking=accept-new"]
     if key:
-        sb[1:1] = ["-i", key]
+        sb[1:1] = ["-i", os.path.expanduser(key)]
     sb.append(dest)
     # 1) python3 on the server (needed for edit_helper)
     r = subprocess.run(sb + ["python3 --version"], capture_output=True)
@@ -280,9 +267,12 @@ def cmd_install(argv):
         die("python3 missing on %s: %s" % (host_ip, (r.stderr or b"").decode()[:200]))
     print("✓ python3 on %s: %s" % (host_ip, (r.stdout or r.stderr).decode().strip()))
 
-    # 2) hosts line (idempotent — replaces a line with the same alias)
-    line = "%s ssh %s%s" % (alias, dest, (" key=" + key) if key else "")
-    _write_hosts_line(alias, line)
+    # 2) the host entry (idempotent — an entry with the same alias is replaced)
+    try:
+        line = config.add_host(CONF, alias, dest, key)
+    except Exception as e:
+        die("cannot write the host config: %s" % e)
+    print("✓ %s: %s" % (os.path.join(CONF, config.TOML_NAME), line))
     # 3) hook instruction (we do NOT touch someone else's settings.json automatically)
     _print_hook_hint()
     # 4) connection test

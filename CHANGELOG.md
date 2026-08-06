@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
+## [2026080613] — 2026-08-06
+
+### Added
+
+- **`~/.config/shunt/shunt.toml`** — a TOML config that replaces the `hosts` file:
+
+  ```toml
+  key = "~/.ssh/id_ed25519_shunt"        # default identity for every host below
+
+  [hosts]
+  web-01  = "user@203.0.113.10"
+  special = { target = "user@203.0.113.30", key = "~/.ssh/id_ed25519_special" }
+  ```
+
+  A bare string is the target; the inline table adds a per-host `key`, which wins over
+  the top-level default. See [`shunt.toml.example`](shunt.toml.example).
+
+  **Why:** the address lived in `hosts` while the identity for it lived in
+  `~/.ssh/config` — one piece of knowledge in two files, which drifts apart in silence.
+  Add a machine on one side, leave its key on the other, and access is gone without a
+  single message. Owning the config removes the dependency on someone else's file, and
+  `tomllib` has been in the standard library since 3.11, so this costs no new dependency.
+
+- **`src/shunt/config.py`** — the only module that knows the config format. Both the CLI
+  and the hook resolve hosts through it; each passes its own config directory, so the
+  knowledge of the *format* lives in the module and the knowledge of the *location* stays
+  with the caller.
+
+### Changed
+
+- `shunt install` now writes to `shunt.toml` instead of appending a `hosts` line. Still
+  idempotent — an entry with the same alias is replaced, never duplicated — and it leaves
+  the rest of the file, comments included, untouched. A `--key` is written down as you
+  typed it (`~/…` stays `~/…`, so the file travels between machines) and expanded only
+  when handed to ssh.
+- `shunt hosts` prints the **resolved** hosts and the file they came from, rather than
+  dumping raw file text that may now be in either of two formats.
+- A broken config is loud: the CLI dies with the reason instead of resolving to no hosts.
+  The hook does the opposite on purpose — it falls back to running **locally**, because a
+  traceback in front of every bash command would be worse than staying home.
+- `hosts.example` is gone, replaced by `shunt.toml.example`. The old format is still
+  read; it is simply no longer the shape recommended to someone writing a config today.
+
+### Backwards compatibility
+
+With no `shunt.toml`, the old `~/.config/shunt/hosts` file is read exactly as before and
+everything keeps working. shunt says once, **on stderr**, where the new place is — stdout
+is a protocol for both callers (the hook writes JSON there, the CLI passes remote output
+through), so a notice may never go that way. **Nothing is migrated automatically**: your
+config file is yours, and moving it is your move, not the tool's. If both files exist,
+`shunt.toml` is the one that counts.
+
 ## [2026080610] — 2026-08-06
 
 **Breaking:** the `daemon` transport is gone. shunt now speaks ssh, and only ssh.

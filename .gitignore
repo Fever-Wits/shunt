@@ -1,6 +1,7 @@
 # secrets & runtime — never commit
 token
 token.*
+shunt.toml
 hosts
 target.*
 active-host.*
@@ -17,7 +18,7 @@ dist/
 *.egg-info/
 build/
 
-# examples ARE tracked (different names): hosts.example
+# examples ARE tracked (different names): shunt.toml.example
 
 # tooling caches
 .ruff_cache/

@@ -51,13 +51,13 @@ class TestResolveHost(_PretoolBase):
         self.assertIsNotNone(h)
         self.assertEqual(h["alias"], "host-a")
         self.assertEqual(h["target"], "user@203.0.113.84")
-        self.assertIn("key=~/.ssh/id_ed25519", h["opts"])
+        self.assertEqual(h["key"], os.path.expanduser("~/.ssh/id_ed25519"))
 
     def test_known_ssh_host(self):
         h = self.pt.resolve_host("raspi")
         self.assertIsNotNone(h)
         self.assertEqual(h["target"], "pi@203.0.113.99")
-        self.assertEqual(h["opts"], [])
+        self.assertIsNone(h["key"])
 
     def test_unknown_host_returns_none(self):
         self.assertIsNone(self.pt.resolve_host("nonexistent"))

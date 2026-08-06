@@ -1,0 +1,21 @@
+# ~/.config/shunt/shunt.toml — the machines shunt can reach.
+#
+# Everything a host needs lives HERE, on purpose. An address kept in one file and its
+# identity in another (~/.ssh/config) breaks silently the day only one of them is edited.
+
+# The identity used for every host below, unless the host names its own.
+key = "~/.ssh/id_ed25519_shunt"
+
+[hosts]
+# <alias> = "<user>@<host>"   — the usual form; `@<alias>` switches the session there
+web-01 = "user@203.0.113.10"
+web-02 = "user@203.0.113.20"
+
+# A machine that needs a DIFFERENT identity — the extended form; its `key` wins over
+# the default above:
+# special = { target = "user@203.0.113.30", key = "~/.ssh/id_ed25519_special" }
+
+# No `key` anywhere? Then ssh chooses the identity itself, as it always did.
+#
+# `shunt install user@host [--alias NAME] [--key PATH]` writes an entry here for you
+# (the same alias is replaced, never duplicated) and leaves the rest of the file alone.

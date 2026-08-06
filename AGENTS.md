@@ -25,7 +25,7 @@ opens a port on the server is a shell for whoever reaches it.
 ## @host switching convention (per-session)
 The hook rewrites bash based on a per-session target file. The agent toggles routing by issuing a
 bare command:
-- `@<alias>` — route subsequent bash to that host (from `~/.config/shunt/hosts`)
+- `@<alias>` — route subsequent bash to that host (from `~/.config/shunt/shunt.toml`)
 - `@local`  — stop redirecting; run locally
 - `@status` — report current routing
 Commands starting with `shunt ` always run locally (they do their own transport).
@@ -35,5 +35,9 @@ Commands starting with `shunt ` always run locally (they do their own transport)
   console-script entry. These are the operations the hook does NOT cover (file read/edit, rsync,
   background jobs, install).
 - `src/shunt/pretool.py` — the PreToolUse hook (matcher: Bash); does the transparent `@host`
-  redirection via `updatedInput`.
+  redirection via `updatedInput`. It is wired into `settings.json` by absolute path, so it may
+  be launched as a plain script — hence the sys.path fallback guarding its `shunt.config` import.
+- `src/shunt/config.py` — the host configuration (`shunt.toml`, legacy `hosts` as fallback).
+  The ONLY module that knows either format; CLI and hook both resolve through it. Do not
+  re-parse hosts anywhere else.
 - `src/shunt/edit_helper.py` — content-based remote edit helper, shipped inline over ssh.

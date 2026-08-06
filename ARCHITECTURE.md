@@ -16,12 +16,13 @@ behaviour and robust across agent-host upgrades.
 
 ## 1. Components
 
-shunt is three Python modules with zero third-party dependencies (stdlib only).
+shunt is four Python modules with zero third-party dependencies (stdlib only).
 
 | Module | Role | Where it runs |
 |---|---|---|
 | `pretool.py` | `PreToolUse` Bash hook — transparent execution by command rewrite | Local (agent host) |
 | `cli.py` | the `shunt` CLI — read / edit / cp / bg / get / log / hosts / install | Local (agent host) |
+| `config.py` | the host configuration — the only module that knows its format | Local (agent host) |
 | `edit_helper.py` | server-side edit-by-content (SHA lock + atomic write + verify) | Remote machine (or local) |
 
 ### 1.1 `pretool.py` — the transparent-execution hook
@@ -82,9 +83,9 @@ slugifies into a readable unit name (`shunt-<label>`); otherwise a random unit
 name is generated.
 
 `shunt install` provisions a host: it verifies `python3` on the server, writes
-an idempotent `hosts` line, and prints the hook snippet to add to the agent
-host's settings (it deliberately does **not** edit the user's settings file).
-Nothing is installed on the server.
+an idempotent entry into `shunt.toml`, and prints the hook snippet to add to the
+agent host's settings (it deliberately does **not** edit the user's settings
+file). Nothing is installed on the server.
 
 ### 1.3 `edit_helper.py` — server-side edit-by-content
 
@@ -236,12 +237,20 @@ same sandbox. Building on that surface means:
 All local state lives under `~/.config/shunt/` (override with `SHUNT_CONF`):
 
 ```
-hosts                      one host per line:  <alias> ssh <target> [key=PATH]
-                             target = user@host
+shunt.toml                 the hosts:  alias = "user@host", or the inline-table form
+                             { target = "user@host", key = "~/.ssh/id" };
+                             a top-level `key` is the default identity
+hosts                      the previous format, still read when shunt.toml is absent:
+                             <alias> ssh <target> [key=PATH]  (one host per line)
 target.<session_id>        active alias for a session (absent = local)
 active-host.<session_id>   sidecar: current routing target (for status displays)
 audit.log                  one line per routed command
 ```
+
+`config.py` is the only module that parses either of the two host formats — the CLI and
+the hook both resolve through it, so the two cannot drift apart. Each caller passes its
+own config directory; the knowledge of the **format** lives in the module, the knowledge
+of the **location** stays with the caller.
 
 The remote side needs nothing pre-installed beyond `python3` (used only by
 `shunt edit` / `shunt commit`, deployed inline).

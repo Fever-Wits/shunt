@@ -65,13 +65,14 @@ at session start.
 
 ## Quickstart
 
-First, register a host (or hand-edit your hosts file — see [Configuration](#configuration)):
+First, register a host (or hand-edit your config file — see [Configuration](#configuration)):
 
 ```bash
 shunt install user@203.0.113.10 --alias web-01 --key ~/.ssh/id_ed25519
 ```
 
-This adds an ssh hosts entry, prints the hook line, and runs a connection test.
+This adds a host entry to `~/.config/shunt/shunt.toml`, prints the hook line, and runs a
+connection test.
 
 Now, **inside Claude Code**, smoke-test the hook. Run:
 
@@ -123,9 +124,13 @@ Print the configured hosts.
 
 ```bash
 $ shunt hosts
-web-01   ssh     user@203.0.113.10    key=~/.ssh/id_ed25519
-web-02   ssh     user@203.0.113.20
+# /home/you/.config/shunt/shunt.toml
+web-01       user@203.0.113.10  key=/home/you/.ssh/id_ed25519
+web-02       user@203.0.113.20
 ```
+
+The hosts as **resolved**, with the file they came from on the first line — not the raw
+text, which may be in either supported format.
 
 ### `shunt read @host <file> [start:end]`
 
@@ -251,18 +256,35 @@ shunt install user@203.0.113.10 --alias web-01 --key ~/.ssh/id_ed25519
 
 ## Configuration
 
-### `~/.config/shunt/hosts`
+### `~/.config/shunt/shunt.toml`
 
-One host per line: `<alias>  ssh  <target>  [key=PATH]`. The target is `user@host`;
-`ssh` is the transport and the only one there is. Lines starting with `#` and blank
-lines are ignored.
+```toml
+# The identity used for every host below, unless the host names its own.
+key = "~/.ssh/id_ed25519_shunt"
 
+[hosts]
+web-01  = "user@203.0.113.10"
+web-02  = "user@203.0.113.20"
+special = { target = "user@203.0.113.30", key = "~/.ssh/id_ed25519_special" }
 ```
-web-01   ssh     user@203.0.113.10    key=~/.ssh/id_ed25519
-web-02   ssh     user@203.0.113.20
-```
 
-See [`hosts.example`](hosts.example).
+A bare string **is** the target (`user@host`); the inline table adds a per-host `key`,
+which wins over the top-level default. With no `key` anywhere, ssh picks the identity
+itself, as it always did.
+
+Everything a host needs lives in this one file on purpose: an address kept here and its
+identity over in `~/.ssh/config` breaks silently the day only one of them is edited —
+machines added on one side, the identity left on the other, and access is gone without a
+word. A broken config is loud rather than empty: the CLI says what is wrong with the file
+instead of resolving to no hosts.
+
+See [`shunt.toml.example`](shunt.toml.example).
+
+**The older `hosts` file still works.** If `shunt.toml` is absent, shunt reads
+`~/.config/shunt/hosts` in the previous format — one host per line,
+`<alias>  ssh  <target>  [key=PATH]` — and says once, on stderr, where the new place is.
+Nothing is migrated for you; move when you want to, or don't. Should both files exist,
+`shunt.toml` is the one that counts.
 
 ### Environment variables
 

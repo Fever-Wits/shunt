@@ -5,9 +5,9 @@ shunt — pretool.py · PreToolUse hook (matcher: Bash)
 Transparently redirects the agent's bash commands to a chosen remote machine.
 Switching: @<alias> / @local / @status — PER-SESSION (does not clash across parallel sessions).
 
-The transport is ssh + ControlMaster (configured per-host in ~/.config/shunt/hosts):
-zero open ports, zero shared token, encrypted. Proven: cwd state-file per session,
-live streaming, speed.
+The transport is ssh + ControlMaster: zero open ports, zero shared token, encrypted.
+Proven: cwd state-file per session, live streaming, speed. It is the only one — the hosts
+come from ~/.config/shunt/shunt.toml (config.py, shared with the CLI).
 
 Why hook + updatedInput (rather than replacing the shell): official, documented mechanism;
 we stay independent of undocumented env settings.
@@ -17,17 +17,19 @@ OK). That is why the client is the `ssh` binary, which is available in the sandb
 """
 import json, sys, os, shlex, time
 
+try:
+    from shunt import config
+except ImportError:
+    # The hook is wired into settings.json by ABSOLUTE PATH (see README), so it may be
+    # started as a plain script: `python3 …/src/shunt/pretool.py` puts …/src/shunt on
+    # sys.path and never …/src, leaving its own package unimportable. The parent
+    # directory is what makes it resolvable; an installed package never gets here.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    from shunt import config
+
 CONF = os.environ.get("SHUNT_CONF", os.path.expanduser("~/.config/shunt"))
 
 REWRITE_MARKER = "#shunt-rewritten\n"
-
-
-def conf_read(name):
-    try:
-        with open(os.path.join(CONF, name)) as f:
-            return f.read()
-    except Exception:
-        return ""
 
 
 def emit(command):
@@ -44,25 +46,21 @@ def echo(msg):
 
 
 def resolve_host(alias):
-    """hosts line: `<alias> ssh <target> [key=...]` → dict or None."""
-    for line in conf_read("hosts").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        p = line.split()
-        # ssh is the only transport: a line naming anything else holds something that is
-        # not an ssh destination, and must not silently become a host
-        if len(p) >= 3 and p[0] == alias and p[1] == "ssh":
-            return {"alias": p[0], "target": p[2], "opts": p[3:]}
-    return None
+    """Alias → {'alias', 'target', 'key'} or None.
+
+    None also covers a broken config: a hook that raises would put a traceback in front
+    of every bash command. Falling back to LOCAL is the safe direction; `shunt hosts`
+    says what is wrong with the file.
+    """
+    try:
+        return config.resolve(CONF, alias)
+    except Exception:
+        return None
 
 
 def ssh_command(host, cmd, sid):
     """ssh + ControlMaster; cwd is kept per session via a remote state-file."""
-    key = None
-    for o in host["opts"]:
-        if o.startswith("key="):
-            key = os.path.expanduser(o[4:])
+    key = host["key"]
     sock = "/tmp/shunt-cm-%s-%%h-%%p.sock" % sid  # per-session AND PER-DESTINATION (%h/%p from ssh) —
     # otherwise two different hosts in the same session → shared socket → commands go to the wrong host
     state = "/tmp/shunt-cwd-%s" % sid

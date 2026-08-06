@@ -18,11 +18,11 @@ None of that limits what the agent may do once it is there. `ssh` protects the c
 
 ### In scope (we try to get these right)
 
-- **No secret of shunt's own.** There is no token, no service account, and nothing of shunt's listening on any port. Keys stay where ssh keeps them; the `hosts` file only names their path — and `hosts`, `target.*`, `active-host.*`, `audit.log` are in `.gitignore`, never committed.
+- **No secret of shunt's own.** There is no token, no service account, and nothing of shunt's listening on any port. Keys stay where ssh keeps them; the config file only names their path — and `shunt.toml`, `hosts`, `target.*`, `active-host.*`, `audit.log` are in `.gitignore`, never committed.
 - **Auditability.** Every redirected command is appended to `~/.config/shunt/audit.log` with timestamp, session id, and host (`pretool.py: main`); `shunt log` tails it.
 - **Host-key checking.** ssh uses `StrictHostKeyChecking=accept-new` (trust-on-first-use), not blanket disabling.
 - **No accidental double-rewrite / cross-host bleed.** The hook guards against re-rewriting (`#shunt-rewritten` marker) and ControlMaster sockets are per-session **and** per-destination (`%h`/`%p` in the socket path) so one host's commands cannot silently go to another (`pretool.py`, `cli.py`).
-- **Loud on an unknown host.** A `hosts` line that does not name the `ssh` transport is not treated as a host at all, rather than being turned into some other destination silently (`pretool.py: resolve_host`, `cli.py: resolve_host`).
+- **Loud on a bad config.** A malformed host entry raises instead of quietly resolving to nothing, and the CLI reports the reason (`config.py: _load_toml`, `cli.py: load_hosts`). In the legacy `hosts` format, a line that does not name the `ssh` transport is not treated as a host at all — rather than being turned into some other destination silently — and the skipped lines are counted out loud (`config.py: _load_legacy`).
 
 ### Out of scope (explicitly **unsupported**)
 
@@ -35,7 +35,7 @@ None of that limits what the agent may do once it is there. `ssh` protects the c
 
 ## Trust & data flow
 
-1. The **PreToolUse hook** (`pretool.py`) runs locally with your privileges. It reads routing from `~/.config/shunt` (the `hosts` file and the per-session `target.<sid>`) and rewrites the agent's bash command.
+1. The **PreToolUse hook** (`pretool.py`) runs locally with your privileges. It reads routing from `~/.config/shunt` (the `shunt.toml` config — or the legacy `hosts` file — and the per-session `target.<sid>`) and rewrites the agent's bash command.
 2. The **rewritten command runs in the agent's sandbox** — which has network access **but no access to `~/.config/shunt`** (documented in `pretool.py`). That constraint is why the client is the `ssh` binary already present in the sandbox.
 3. `ssh` with `ControlMaster` carries the command to the remote host over a multiplexed, encrypted, key-authenticated channel; cwd is preserved per session via a remote state-file. No open port, no shared token.
 4. The remote host executes and streams stdout/stderr back.
