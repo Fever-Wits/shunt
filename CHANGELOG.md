@@ -5,6 +5,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
+## [2026080623] — 2026-08-06
+
+Five of these were **silent**: they answered `ok`, or said nothing at all, while doing
+something other than what was asked — on other people's files and other people's
+machines. Two of them change behaviour you may have relied on; both are called out below.
+
+### Fixed
+
+- **`shunt edit` no longer damages a file it reports as edited.** The helper decoded the
+  file (`errors="replace"`), edited the *text* and wrote the text back. So every byte that
+  was not valid UTF-8 came back as U+FFFD — one latin-1 character in a comment was enough
+  to corrupt a config — and a file with mixed line endings was converted **whole**. Both
+  were reported as `{"status": "ok", "verified": true}` with a diff showing only the line
+  you asked about, because the diff was computed *before* the conversion.
+
+  The match and the replacement now happen on the **raw bytes**: nothing outside the
+  matched region is rewritten, and the diff is computed from the bytes on disk and the
+  bytes about to be written. Line-ending tolerance is unchanged in effect — the *needle*
+  is retried as all-LF and as all-CRLF, and `normalized: true` still means "matched in a
+  variant" — but the file is no longer rewritten into another style. The honest edge: the
+  needle arrives as JSON and can only be UTF-8, so a needle that is not returns
+  `not_found` instead of a guess; for latin-1 **text**, use `checkout`/`commit`, which
+  never decode.
+
+- **A session routed to a host that no longer resolves now runs nothing.** ⚠ **Behaviour
+  change.** Previously a renamed alias or a broken `shunt.toml` made the hook fall back to
+  running the command **locally** — while `@status` still said REMOTE. A `rm -rf
+  /var/log/*` meant for a server deleted the local one. The hook cannot raise (a traceback
+  in front of every bash command is worse than anything it would report), so it takes the
+  third way it already uses for an unknown `@alias`: the command is replaced by the reason
+  nothing ran — `[shunt] cannot resolve @web-01 — command NOT run …`.
+
+- **A failed `checkout` no longer destroys the local file it was refreshing.** The pull
+  opened the local path for writing, which truncates it the moment the process starts —
+  before ssh has said a word — and then unlinked it when ssh failed. Checking a file out
+  again over an unreachable host therefore threw away every uncommitted edit in it. The
+  pull now lands in a `.part` file beside the target and is moved into place only on
+  success.
+
+- **`shunt edit` exits non-zero when the edit did not happen.** ⚠ **Behaviour change** for
+  anything reading its exit code. The helper answers in JSON and always exits 0 —
+  `not_found`, `ambiguous` and `conflict` included — and the CLI passed ssh's code straight
+  back, so `shunt edit … && deploy` deployed an unedited file. The code now follows the
+  status: `0` only for `ok`. A transport failure keeps ssh's own code. The JSON still goes
+  to stdout, unchanged, so the reason stays readable.
+
+- **`--dry-run` is honoured on the `--stdin` path too.** It was read only on the OLD/NEW
+  path, so `shunt edit @host <file> --stdin --dry-run` **wrote** — with a flag on the
+  command line asking it not to. It may only add safety: a payload that already asks for a
+  dry run is never turned into a write.
+
+- **The ControlMaster socket is keyed on the ssh user as well** (`%r@%h:%p`, the shape the
+  CLI already used). Two aliases pointing at one machine with different accounts —
+  `deploy@web-01` and `root@web-01`, which the config allows — shared the first one's
+  master connection, so the second ran as the **wrong account**, silently, with entirely
+  plausible output.
+
+- **The audit log counts commands, not lines.** A multi-line command was written raw, so
+  one command became several lines — and every reader of the log counts lines: the trimmer
+  dates its cut from the first ten characters of one, `shunt log -n N` showed N of them.
+  A continuation line starting with a space fell out of a cut while one starting with a
+  letter survived, so a **kept** command lost part of its body and the fragments passed for
+  records of their own. Commands are now folded onto one line on the way in (`\n` → `\\n`)
+  and unfolded by `shunt log`; both trim cuts move whole records. Logs written before this
+  are read correctly too: a line without a date belongs to the record above it.
+
+- **One unreadable line no longer disarms the trimmer forever.** The cut date was parsed
+  from the oldest line, and the exception was swallowed by the fire-and-forget wrapper — so
+  a single torn line stopped every future trim, and the log grew past its ceiling without a
+  word. The parse now yields `None` and the size cut does the freeing; it drops from the
+  front, so the damaged line is the first to go.
+
+### Added
+
+- **The CLI writes to the audit log too.** `run`, `edit`, `cp`, `bg`, `get` and `commit`
+  each append one record (`sid=cli`, the subcommand in brackets: `:: [run] uptime`). The
+  hook recorded every redirected bash command while the CLI recorded nothing — and
+  `shunt run` is the path recommended to agents, which made the recommended path the
+  unaudited one. Read-only subcommands stay out: they bring something back rather than
+  sending something out. `shunt log` shows both halves together.
+
 ## [2026080614] — 2026-08-06
 
 ### Added

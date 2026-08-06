@@ -17,7 +17,9 @@ Coverage:
   - neither file → no hosts, and the CLI dies with a reason
   - add_host (what `shunt install` writes): creates the file, replaces the same alias
     instead of duplicating it, keeps comments and the other hosts, round-trips
-  - the HOOK resolves through the same module (end-to-end, as the harness runs it)
+  - the HOOK resolves through the same module (end-to-end, as the harness runs it), and
+    when it CANNOT resolve — broken file, renamed alias — it refuses the command instead
+    of running it on this machine
 
 Everything happens in a temp SHUNT_CONF — no real config is read or written.
 """
@@ -397,13 +399,36 @@ class TestHookUsesTheSameConfig(unittest.TestCase):
             self.assertIn("root@10.0.0.1", cmd)
             self.assertIn("-i /keys/default", cmd)
 
-    def test_broken_config_keeps_bash_local(self):
-        """A traceback in front of every command would be worse than staying home."""
+    def test_broken_config_refuses_instead_of_running_here(self):
+        """The command was meant for a server. It must not quietly run on this machine.
+
+        This test replaces one that pinned the opposite ("keeps bash local"): a traceback
+        in front of every command IS worse than staying home, but those were never the
+        only two options. The session still says REMOTE, so a command that stays home
+        runs where nobody aimed it — `rm -rf /var/log/*` on the local disk. The hook has
+        a third move and already uses it for @unknown: replace the command with a line
+        that says why nothing ran.
+        """
         with TmpConf() as c:
             c.write("shunt.toml", "[hosts\nh1 = ")
             with open(os.path.join(c.dir, "target.s1"), "w") as f:
                 f.write("h1")
-            self.assertIsNone(self._run_hook(c.dir, "ls -la"))
+            cmd = self._run_hook(c.dir, "rm -rf /var/log/*")
+            self.assertIsNotNone(cmd)
+            self.assertNotIn("rm -rf", cmd)          # the dangerous command is gone
+            self.assertTrue(cmd.startswith("echo "))
+            self.assertIn("cannot resolve @h1", cmd)
+            self.assertIn("NOT run", cmd)
+
+    def test_renamed_alias_refuses_too(self):
+        """The config parses fine — the alias the session sits on is simply not in it."""
+        with TmpConf() as c:
+            c.write("shunt.toml", '[hosts]\nweb-02 = "root@10.0.0.2"\n')
+            with open(os.path.join(c.dir, "target.s1"), "w") as f:
+                f.write("web-01")                    # renamed since the session switched
+            cmd = self._run_hook(c.dir, "ls -la")
+            self.assertNotIn("ssh", cmd)
+            self.assertIn("cannot resolve @web-01", cmd)
 
 
 if __name__ == "__main__":

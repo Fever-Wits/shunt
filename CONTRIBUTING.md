@@ -35,7 +35,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
 feat: add @host alias autocompletion
-fix: preserve CRLF style on edit verify
+fix: keep the socket keyed on the ssh user
 docs: clarify the transport threat model
 ```
 

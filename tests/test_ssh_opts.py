@@ -8,6 +8,7 @@ Coverage:
   - ControlMaster reaches cp — it did not, so cp opened a fresh connection each time
   - the key is included when the host has one, absent when it does not
   - a per-host key wins over the default
+  - the hook's own socket is keyed on the same things as the CLI's (user, host, port)
 
 Why this file exists: the options were written TWICE — once in ssh_argv, once inside
 cmd_cp — and the copy fell behind the original. This is the test that makes them one.
@@ -23,6 +24,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import shunt.cli as shunt_mod
+import shunt.pretool as pretool
 
 
 class TmpHosts:
@@ -122,6 +124,43 @@ class TestKey(unittest.TestCase):
         host = {"alias": "h", "target": "root@10.0.0.1", "key": "/keys/k"}
         opts = shunt_mod.ssh_opts(host)
         self.assertEqual(opts[:2], ["-i", "/keys/k"])
+
+
+# ── the third copy: the hook's own socket ──────────────────────────────────────
+
+class TestHookControlPath(unittest.TestCase):
+    """A muxed connection is shared by whoever names the same socket.
+
+    So the socket name must carry every part of the destination. It carried the host and
+    the port but not the USER — and the config allows two aliases onto one machine with
+    different accounts (`deploy@web-01`, `root@web-01`). The second one would ride the
+    first one's master and run as the wrong account, silently, with the right output.
+    """
+
+    def _controlpath(self, target):
+        host = {"alias": "h", "target": target, "key": None}
+        cmd = pretool.ssh_command(host, "ls", "sess-1")
+        opt = [part for part in cmd.split() if part.startswith("ControlPath=")]
+        return opt[0]
+
+    def test_the_socket_is_keyed_on_the_user(self):
+        self.assertIn("%r", self._controlpath("root@10.0.0.1"))
+
+    def test_the_socket_is_keyed_on_host_and_port_too(self):
+        path = self._controlpath("root@10.0.0.1")
+        self.assertIn("%h", path)
+        self.assertIn("%p", path)
+
+    def test_the_socket_is_keyed_on_the_session(self):
+        """Parallel sessions must not share a master either — that was already true."""
+        self.assertIn("sess-1", self._controlpath("root@10.0.0.1"))
+
+    def test_the_hook_and_the_cli_key_on_the_same_things(self):
+        """One fact, two homes: whatever one keys on, the other must key on as well."""
+        hook = self._controlpath("root@10.0.0.1")
+        for token in ("%r", "%h", "%p"):
+            self.assertIn(token, shunt_mod.SOCK, "the CLI dropped %s" % token)
+            self.assertIn(token, hook, "the hook dropped %s" % token)
 
 
 if __name__ == "__main__":

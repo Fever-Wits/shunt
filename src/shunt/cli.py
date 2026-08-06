@@ -12,11 +12,14 @@ shunt CLI (this file) = the special operations:
   shunt edit  @host <file> OLD NEW         edit by CONTENT (edit_helper on the other side)
               [--expected N] [--dry-run]
   shunt edit  @host <file> --stdin         JSON {old,new,expected,base_sha} from stdin (multi-line)
+              [--dry-run]
   shunt cp    <src> <dst>                  rsync (one side @host:/path)
   shunt bg    @host <cmd> [--name LABEL]   long task (systemd-run); prints JOB=<unit>
   shunt bg    @host --list|--status JOB|--stop JOB
   shunt get   @host <url> [dest]           wget -b (background download on the server itself)
-  shunt log   [-n N]                       tail of ~/.config/shunt/audit.log (default 50 lines)
+  shunt log   [-n N]                       last N records of ~/.config/shunt/audit.log
+                                           (default 50) — redirected bash AND these
+                                           subcommands; N counts commands, not lines
   shunt checkout @host <remote_path>       pull remote file locally so agent can Read/Edit/Write it
   shunt checkout --list                    show current checkouts (local ↔ remote @host, sha)
   shunt checkout --abandon <local_path>    drop manifest entry (leave local file in place)
@@ -29,6 +32,7 @@ read when no shunt.toml exists. Everything goes through ssh, the only transport.
 import sys, os, json, base64, shlex, subprocess, hashlib
 
 from shunt import config
+from shunt import pretool     # audit() — see audit_cli(); the log format — see cmd_log()
 
 CONF = os.environ.get("SHUNT_CONF", os.path.expanduser("~/.config/shunt"))
 SELF_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -87,6 +91,26 @@ def ssh_opts(host):
              "-o", "ControlPath=" + SOCK, "-o", "ControlPersist=300",
              "-o", "BatchMode=yes"]
     return opts
+
+
+def audit_cli(subcommand, alias, detail):
+    """Record one CLI operation in the same log the hook writes.
+
+    The hook logged every redirected bash command while the CLI logged nothing — and the
+    CLI is the path we recommend to agents (`shunt run`), so the recommended path was the
+    unaudited one. Read/checkout/hosts/log stay out: they only bring things back.
+
+    Shared with the hook rather than copied, because the log is ONE thing: where it
+    lives, when it is trimmed, and that a log line may never break the operation it
+    records. A second copy of that would drift the day one side changed. The seam is one
+    function call with the config dir passed in — the same split config.py already uses
+    (format shared, location with the caller), which is also what keeps a test from
+    writing into the real log.
+
+    The line says WHAT it was: `sid=cli` (there is no session here) and the subcommand in
+    front of the detail, so a CLI record cannot be read as bash that ran on the host.
+    """
+    pretool.audit("cli", alias, "[%s] %s" % (subcommand, detail), conf=CONF)
 
 
 # ── subcommands ──────────────────────────────────────────────────────────────
@@ -155,6 +179,7 @@ def cmd_run(argv):
     # one argument → passed through verbatim, so `shunt run @h "ls | wc -l"` keeps its pipe
     # several → re-quoted, so `shunt run @h echo "a b"` stays two words, not three
     cmd = argv[1] if len(argv) == 2 else shlex.join(argv[1:])
+    audit_cli("run", host["alias"], cmd)
     return subprocess.run(ssh_argv(host) + [cmd]).returncode
 
 
@@ -181,6 +206,12 @@ def cmd_edit(argv):
     if "--stdin" in rest:
         payload = json.load(sys.stdin)
         payload["file"] = f
+        if "--dry-run" in rest:
+            # The flag reaches the payload here too, or it would mean two different
+            # things depending on how the edit was handed over: a preview on one path
+            # and a WRITE on someone else's file on the other. It may only ADD safety —
+            # a payload that already asks for a dry run is never turned into a write.
+            payload["dry_run"] = True
     else:
         dry = "--dry-run" in rest
         rest = [x for x in rest if x != "--dry-run"]
@@ -193,12 +224,28 @@ def cmd_edit(argv):
             die("usage: shunt edit @host <file> OLD NEW [--expected N] [--dry-run]")
         payload = {"file": f, "old": rest[0], "new": rest[1],
                    "expected": expected, "dry_run": dry}
+    audit_cli("edit", host["alias"],
+              f + (" (dry-run)" if payload.get("dry_run") else ""))
     b64 = base64.b64encode(json.dumps(payload).encode()).decode()
     with open(HELPER, "rb") as _hf:
         helper_src = _hf.read()
     # inline deployment: helper source via stdin (python3 -), JSON as base64 argv
-    r = subprocess.run(ssh_argv(host) + ["python3", "-", b64], input=helper_src)
-    return r.returncode
+    r = subprocess.run(ssh_argv(host) + ["python3", "-", b64], input=helper_src,
+                       capture_output=True)
+    raw_out = (r.stdout or b"").decode("utf-8", "replace")
+    sys.stdout.write(raw_out)                   # the helper's JSON is the answer — verbatim
+    sys.stderr.write((r.stderr or b"").decode("utf-8", "replace"))
+    if r.returncode != 0:
+        return r.returncode                     # the transport itself failed
+    # The exit code must mean what a caller reads it to mean. The helper answers in JSON
+    # and always exits 0 — `not_found`, `ambiguous`, `conflict` included — so passing ssh's
+    # code straight back made `shunt edit … && deploy` deploy an unchanged file. Read the
+    # status, the way cmd_commit already does.
+    try:
+        result = json.loads(raw_out.strip())
+    except Exception:
+        return 1                                # an answer that is not the helper's
+    return 0 if result.get("status") == "ok" else 1
 
 
 def cmd_cp(argv):
@@ -218,6 +265,7 @@ def cmd_cp(argv):
     h = host["ref"]
     if not h:
         die("at least one side must be @host:/path")
+    audit_cli("cp", h["alias"], "%s -> %s" % (argv[0], argv[1]))
     # rsync takes its ssh command as ONE string — same options as every other hand
     e = "ssh " + " ".join(shlex.quote(o) for o in ssh_opts(h))
     return subprocess.run(["rsync", "-az", "--info=progress2", "-e", e, rsrc, rdst]).returncode
@@ -229,6 +277,9 @@ def cmd_bg(argv):
     host = resolve_host(argv[0])
     sa = ssh_argv(host)
     rest = argv[1:]
+    # one line for every shape of bg — starting a job, stopping one, asking about them:
+    # what the CLI asked that host to do is exactly what the log is read for
+    audit_cli("bg", host["alias"], " ".join(rest))
     if rest[0] == "--list":
         return subprocess.run(sa + ["systemctl list-units 'shunt-*' --type=service --no-legend || true"]).returncode
     if rest[0] == "--status":
@@ -266,7 +317,16 @@ def cmd_bg(argv):
 
 
 def cmd_log(argv):
-    """shunt log [-n N] — tail of ~/.config/shunt/audit.log (default 50 lines)."""
+    """shunt log [-n N] — the last N RECORDS of ~/.config/shunt/audit.log (default 50).
+
+    Both halves of what left this machine: bash the hook redirected (`sid=<session>`)
+    and CLI subcommands that touched a host (`sid=cli`, subcommand in brackets).
+
+    N counts COMMANDS, not lines. A multi-line command is stored folded onto one line and
+    printed back the way it was typed; one inherited from a log written before folding
+    spans several lines and is shown with the record it belongs to (pretool.log_records —
+    the same grouping the trimmer uses, so both halves count the same thing).
+    """
     n = 50
     rest = list(argv)
     if "-n" in rest:
@@ -286,8 +346,10 @@ def cmd_log(argv):
     except Exception as e:
         sys.stderr.write("shunt: cannot read audit log: %s\n" % e)
         return 1
+    records = pretool.log_records(lines)
     n = abs(n)                                  # negative -n → last |n| (not a bad slice)
-    sys.stdout.writelines(lines[-n:] if n else [])
+    shown = records[-n:] if n else []
+    sys.stdout.writelines(pretool.log_text(rec) for rec in shown)
     return 0
 
 
@@ -297,6 +359,7 @@ def cmd_get(argv):
     host = resolve_host(argv[0])
     url = argv[1]
     dest = argv[2] if len(argv) > 2 else "."
+    audit_cli("get", host["alias"], "%s -> %s" % (url, dest))
     log = "/tmp/shunt-wget-%s.log" % base64.b16encode(os.urandom(3)).decode().lower()
     remote = ("cd %s && wget -b -o %s %s && echo 'downloading in background; progress: shunt read @%s %s or tail -f %s'"
               % (shlex.quote(dest), shlex.quote(log), shlex.quote(url),
@@ -438,18 +501,25 @@ def cmd_checkout(argv):
         die("unsafe remote path (escapes checkout sandbox): %s" % remote_path)
     os.makedirs(os.path.dirname(local), exist_ok=True)
 
-    # pull via `cat` over ssh — raw-faithful (no scp binary quoting issues)
+    # pull via `cat` over ssh — raw-faithful (no scp binary quoting issues).
+    # Into a temp file NEXT TO the target, moved into place only on success (same pattern
+    # as _manifest_save): opening `local` for writing truncates it before ssh has even
+    # started, so a failed RE-checkout used to destroy the local edits it was called to
+    # refresh — forty minutes of work for one unreachable host.
     sa = ssh_argv(host)
-    r = subprocess.run(sa + ["cat -- " + shlex.quote(remote_path)],
-                       stdout=open(local, "wb"), stderr=subprocess.PIPE)
+    part = local + ".part"
+    with open(part, "wb") as f:
+        r = subprocess.run(sa + ["cat -- " + shlex.quote(remote_path)],
+                           stdout=f, stderr=subprocess.PIPE)
     if r.returncode != 0:
-        # clean up empty file on failure
         try:
-            os.unlink(local)
+            os.unlink(part)
         except Exception:
             pass
         sys.stderr.write((r.stderr or b"").decode("utf-8", "replace"))
-        die("checkout failed (exit %d)" % r.returncode, r.returncode)
+        die("checkout failed (exit %d) — the local file is untouched" % r.returncode,
+            r.returncode)
+    os.replace(part, local)
 
     base_sha = _sha256_file(local)
     m = _manifest_load()
@@ -544,6 +614,8 @@ def cmd_commit(argv):
             "base_sha": manifest_base_sha,
         }
         b64 = base64.b64encode(json.dumps(payload).encode()).decode()
+        # logged per file, here: everything before this point only READ the remote side
+        audit_cli("commit", alias, remote_path)
         r2 = subprocess.run(sa + ["python3", "-", b64],
                             input=write_helper_src, capture_output=True)
         raw_out = (r2.stdout or b"").decode("utf-8", "replace").strip()

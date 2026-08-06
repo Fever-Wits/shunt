@@ -7,7 +7,8 @@ agent's bash commands to a chosen remote machine — the agent keeps running pla
 `ls`, `grep`, `make`, and each one executes on the host you've switched to, with
 per-session working directory kept across commands. Alongside the hook ships a small
 `shunt` CLI for the things bash alone can't do well over a wire: `run`, `read`, `edit`,
-`cp`, `bg`, `get`, `log`, `checkout`, and `commit`.
+`cp`, `bg`, `get`, `log`, `checkout` and `commit` — plus `hosts`, `install`, and a bare
+`shunt` that prints its own map.
 
 What you can do: **edit remote files** with your normal local tools · **run commands transparently** on a remote host · **long tasks** in the background with `bg` + `--status` to monitor.
 
@@ -123,6 +124,20 @@ each routed command to `~/.config/shunt/audit.log`.
 `shunt ...` commands themselves always run locally — the CLI does its own
 transport, so it is never redirected.
 
+Two behaviours worth knowing before you rely on the transparency:
+
+- **An interrupted command is not killed on the far side.** No pty is allocated, so
+  nothing sends the remote process SIGHUP — it keeps running there until it finishes on
+  its own. Allocating one (`ssh -tt`) was measured and rejected: it hangs every pager and
+  stdin reader, merges stderr into stdout, and colours the output. Start long work with
+  `shunt bg` instead, and stop it with `shunt bg @host --stop JOB`.
+- **If the routed alias stops resolving** — renamed, deleted, or the config broke — the
+  hook runs **nothing**. It cannot raise (a traceback in front of every bash command is
+  worse than anything it would report), and it will not quietly run the command here:
+  the session still says REMOTE, so `rm -rf /var/log/*` meant for a server would hit your
+  own disk. Instead the command is replaced by the reason it did not go:
+  `[shunt] cannot resolve @web-01 — command NOT run …`. Fix the config, or `@local`.
+
 ### Where the mode stops
 
 **The mode covers `bash` and nothing else.** File tools (`Read`, `Write`, `Edit`,
@@ -189,8 +204,11 @@ $ shunt read @web-01 /var/log/app.log 100:120
 
 Edit a remote file **by content** (not by line number), with the same semantics as
 the built-in Edit tool: `OLD` must occur exactly once (or `--expected N` times),
-otherwise the edit is refused. The edit is verified after write (SHA-256), written
-atomically, and CRLF line endings are preserved.
+otherwise the edit is refused. The edit is verified after write (SHA-256) and written
+atomically. It is applied to the **raw bytes**: only the matched region is rewritten, so
+line endings elsewhere in the file and bytes that are not valid UTF-8 come back exactly
+as they were. The exit code follows the answer — **0 only when the file was changed** —
+so `shunt edit … && deploy` is safe to write.
 
 ```bash
 $ shunt edit @web-01 /opt/app/config.ini "debug = false" "debug = true"
@@ -205,7 +223,8 @@ $ shunt edit @web-01 /opt/app/config.ini "debug = false" "debug = true"
 - `--expected N` — require exactly `N` matches (default 1); a mismatch returns
   `{"status": "ambiguous", "count": …, "expected": …}`.
 - `--stdin` — for multi-line edits, pass a JSON payload on stdin (avoids shell
-  quoting). Recognized keys: `old`, `new`, `expected`, `base_sha` (optimistic lock):
+  quoting). Recognized keys: `old`, `new`, `expected`, `base_sha` (optimistic lock).
+  `--dry-run` works here too:
   ```bash
   echo '{"old":"line one\nline two","new":"replacement","expected":1}' \
     | shunt edit @web-01 /opt/app/main.py --stdin
@@ -223,8 +242,10 @@ $ shunt cp @web-01:/var/log/app.log ./app.log
 ### `shunt bg @host <cmd> [--name LABEL]`
 
 Run a long task on the remote host that survives disconnect and preserves its exit
-code. Implemented with **`systemd-run`** at the system level → **requires root /
-sudo on the remote host**. Prints `JOB=<unit>`.
+code. Implemented with **`systemd-run`** transient units at the **system** level (no
+`--user`, and shunt never invokes `sudo` itself) → the ssh user must be allowed to
+create system units, which in practice means **root on that host**. This is the only
+feature that needs it. Prints `JOB=<unit>`.
 
 ```bash
 $ shunt bg @web-01 "make -j8 all" --name nightly-build
@@ -255,13 +276,16 @@ downloading in background; progress: shunt read @web-01 /tmp/shunt-wget-….log 
 
 ### `shunt log [-n N]`
 
-Tail the local audit log of redirected commands (`~/.config/shunt/audit.log`).
-Default 50 lines; `-n N` for the last `N`.
+The local record of what left this machine (`~/.config/shunt/audit.log`): bash the hook
+redirected, and the CLI subcommands that reached a host (`sid=cli`, the subcommand in
+brackets). Default the last 50 **records**; `-n N` for the last `N`. One command is one
+record, however many lines it was typed on.
 
 ```bash
 $ shunt log -n 20
 2026-06-23T10:15:02 sid=… host=web-01 :: hostname
 2026-06-23T10:15:09 sid=… host=web-01 :: make -j8 all
+2026-06-23T10:16:41 sid=cli host=web-01 :: [edit] /opt/app/config.ini
 ```
 
 The log is an **archive**, and trimming it is a **fuse**, not a retention policy: it is
@@ -284,18 +308,30 @@ shunt commit                                  # pushes all pending checkouts bac
 
 - `shunt checkout --list` — show current checkouts (local path, remote `@host:/path`, base SHA).
 - `shunt checkout --abandon <local_path>` / `shunt commit --abandon <local_path>` — drop the manifest entry without pushing (local file stays on disk).
+- A **failed** checkout leaves the local file alone. The pull is written beside it and
+  moved into place only once it has fully arrived, so checking a file out again over an
+  unreachable host cannot destroy the edits you have not committed yet.
+
+A bare `shunt commit` pushes **every** pending checkout and is per-entry, not
+all-or-nothing: a conflict, an unreadable local file, or an entry whose host is no longer
+configured is reported on its own line (`CONFLICT` / `SKIP`) and makes the exit code
+non-zero, while the rest of the files still go.
 
 ### `shunt install <user>@<host> [--alias A] [--key PATH]`
 
-Register a host and print the hook line: checks `python3` on the server, writes an
-ssh hosts line, and tests the connection. Nothing is installed on the server.
+Register a host and print the hook line: checks `python3` on the server, writes the host
+into `~/.config/shunt/shunt.toml`, and tests the connection. Nothing is installed on the
+server, and your `settings.json` is printed for you to edit, never edited for you.
 
 ```bash
 shunt install user@203.0.113.10 --alias web-01 --key ~/.ssh/id_ed25519
 ```
 
-- `--alias A` — host alias (defaults to the IP with dots → dashes).
+- `--alias A` — host alias (defaults to the host part of `user@host` with dots → dashes).
 - `--key PATH` — ssh identity file.
+
+The entry is written **idempotently**: an existing entry with the same alias is replaced,
+never duplicated, and the rest of the file — your comments included — survives.
 
 ---
 
@@ -332,9 +368,9 @@ drop_months = 2      # then the OLDEST months go — the rest of the history sta
 ```
 
 Size is the trigger; age is only the unit in which room gets freed. Should everything in
-the file be recent — something wrote a month's worth of lines in an hour — the oldest
-lines go until it fits, because otherwise the fuse would fail in exactly the case it
-exists for. Bad or missing values fall back to the defaults above: a setting must never
+the file be recent — something wrote a month's worth of commands in an hour — the oldest
+records go until it fits, because otherwise the fuse would fail in exactly the case it
+exists for. Both cuts move whole records, never half a command. Bad or missing values fall back to the defaults above: a setting must never
 be the reason a command fails.
 
 See [`shunt.toml.example`](shunt.toml.example).
@@ -350,7 +386,7 @@ Nothing is migrated for you; move when you want to, or don't. Should both files 
 | Variable | Used by | Meaning |
 |----------|---------|---------|
 | `SHUNT_CONF` | CLI + hook | Config directory (default `~/.config/shunt`) |
-| `SHUNT_EDIT_MAX_BYTES` | edit helper | Max file size for `shunt edit` (default 64 MiB; larger → use `shunt cp` + local edit) |
+| `SHUNT_EDIT_MAX_BYTES` | edit + write helpers | Max file size shunt will **push** — `shunt edit` and `shunt commit` (default 64 MiB; larger → use `shunt cp` + local edit). It does **not** cap the pull direction: `shunt checkout` fetches whatever is there, so check the size of a big remote file first. |
 
 ---
 

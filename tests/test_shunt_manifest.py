@@ -428,6 +428,52 @@ class TestCheckoutPull(unittest.TestCase):
             self.assertNotEqual(ctx.exception.code, 0)
             # manifest must NOT have a new entry
             self.assertEqual(shunt_mod._manifest_load(), {})
+            # and nothing half-pulled is left behind either
+            local = shunt_mod._checkout_local_path("myhost", "/remote/file.py")
+            self.assertFalse(os.path.exists(local))
+            self.assertFalse(os.path.exists(local + ".part"))
+
+    def test_failed_recheckout_keeps_the_edited_local_file(self):
+        """The expensive one: checkout → edit for forty minutes → checkout again → ssh dies.
+
+        The pull used to open the local file for writing, which truncates it the moment
+        the process starts — before ssh has said a word — and then unlinked it when ssh
+        failed. The work was gone, and the command that destroyed it was the one asked to
+        REFRESH it. The remedy is the atomic pattern the rest of the tree already uses:
+        write beside the target, move into place only on success.
+        """
+        edited = b"my forty minutes of work\n"
+
+        def fake_run(cmd, **kwargs):
+            stdout = kwargs.get("stdout")
+            if stdout and hasattr(stdout, "write"):
+                stdout.write(b"partial garbage")     # a half-written pull, then failure
+            m = MagicMock()
+            m.returncode = 255
+            m.stderr = b"ssh: connect to host 203.0.113.1 port 22: No route to host"
+            return m
+
+        with TmpConf() as conf:
+            self._make_hosts(conf)
+            local = os.path.realpath(shunt_mod._checkout_local_path("myhost", "/remote/file.py"))
+            os.makedirs(os.path.dirname(local), exist_ok=True)
+            with open(local, "wb") as f:
+                f.write(edited)
+            shunt_mod._manifest_save({local: {"host": "myhost", "remote": "/remote/file.py",
+                                              "base_sha": "sha_from_the_first_checkout"}})
+
+            with patch("subprocess.run", side_effect=fake_run):
+                with patch("sys.stderr", new_callable=io.StringIO):
+                    with self.assertRaises(SystemExit) as ctx:
+                        shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
+
+            self.assertNotEqual(ctx.exception.code, 0)
+            with open(local, "rb") as f:
+                self.assertEqual(f.read(), edited)   # the edits are still there
+            self.assertFalse(os.path.exists(local + ".part"))
+            # the manifest still describes the checkout that DID happen
+            self.assertEqual(shunt_mod._manifest_load()[local]["base_sha"],
+                             "sha_from_the_first_checkout")
 
     def test_checkout_rejects_path_traversal(self):
         """A remote_path with '..' that escapes the sandbox is refused before any

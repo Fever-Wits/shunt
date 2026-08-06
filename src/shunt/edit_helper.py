@@ -6,6 +6,9 @@ Runs on the remote machine (or locally). Input = JSON on stdin, output = JSON on
 Zero external dependencies (stdlib only). Payload via stdin → ZERO shell escaping (binary-safe).
 
 Semantics like the built-in Edit: `old → new`, requires UNIQUENESS (expected matches; otherwise refuse).
+Byte-exact: the match and the replacement happen on the raw bytes, so nothing outside the
+match is ever rewritten — not a byte that is invalid UTF-8, not a line ending elsewhere in
+the file. `normalized: true` means only that the match was found in a line-ending variant.
 Triangulated design (web research 2026-06-22) + borrowings: a pattern from prior internal tooling
 (checksum/atomic), desktop-commander (count-and-refuse + fuzzy-diag), Aider/Claude str_replace
 (address by content).
@@ -28,6 +31,24 @@ def sha256(b: bytes) -> str:
 
 def out(d):
     print(json.dumps(d, ensure_ascii=False))
+
+
+def eol_variants(old: bytes, new: bytes):
+    """The (old, new) pairs to look for, in order: as given · all-LF · all-CRLF.
+
+    A line ending is the commonest reason a literal match fails, so the variants exist —
+    but they only ever change what is LOOKED FOR. The file is never rewritten into
+    another style: that would touch lines nobody asked about, and the diff (computed
+    from the real bytes) would not even show it. Only the match itself changes.
+    """
+    lf = (old.replace(b"\r\n", b"\n"), new.replace(b"\r\n", b"\n"))
+    crlf = (lf[0].replace(b"\n", b"\r\n"), lf[1].replace(b"\n", b"\r\n"))
+    return [(old, new), lf, crlf]
+
+
+def display_lines(b: bytes):
+    """Bytes as lines for the diff — lossy on purpose, and never written back."""
+    return b.decode("utf-8", "replace").splitlines(keepends=True)
 
 
 def main():
@@ -75,35 +96,39 @@ def main():
                     "hint": "the file has changed; re-read and try again",
                     "resolved_path": path})
 
-    text = raw.decode("utf-8", "replace")
+    # Match and replace on BYTES, like the sibling write_helper.py. Decoding the file to
+    # text and writing that text back is how a helper that answers `ok` destroys a file:
+    # `errors="replace"` turns every byte that is not UTF-8 into U+FFFD, and the whole
+    # file is then re-encoded from the damaged text. Here nothing outside the match is
+    # ever rewritten — not one byte, not one line ending.
+    old_b = old.encode("utf-8")
+    new_b = new.encode("utf-8")
 
-    # match: exact first; if 0 → try normalized line endings (CRLF→LF) — most failures die here
-    count = text.count(old)
-    normalized = False
-    work, o, n = text, old, new
-    if count == 0:
-        work = text.replace("\r\n", "\n")
-        o = old.replace("\r\n", "\n")
-        n = new.replace("\r\n", "\n")
-        count = work.count(o)
-        normalized = count > 0
+    # match: as given first; if 0 → the line-ending variants, where most failures die
+    count, normalized = 0, False
+    for variant, (o, n) in enumerate(eol_variants(old_b, new_b)):
+        count = raw.count(o)
+        if count:
+            normalized = variant > 0
+            break
 
     if count == 0:
         return out({"status": "not_found",
-                    "hint": "old not found (even with normalized CRLF); add unique context",
+                    "hint": "old not found (tried as given, all-LF and all-CRLF); add "
+                            "unique context, or check the file is UTF-8",
                     "resolved_path": path})
     if count != expected:
         return out({"status": "ambiguous", "count": count, "expected": expected,
                     "hint": "add surrounding context for uniqueness",
                     "resolved_path": path})
 
-    new_text = work.replace(o, n)
+    new_bytes = raw.replace(o, n)
+    # The diff is computed from the bytes on disk and the bytes about to be written —
+    # decoded only for display. Computed from anything else it can HIDE a change: it
+    # once showed one edited line while the whole file was being converted to CRLF.
     diff = "".join(difflib.unified_diff(
-        work.splitlines(keepends=True), new_text.splitlines(keepends=True),
-        fromfile=path, tofile=path + " (edited)"))   # diff on an LF basis — clean to read
-    if normalized and "\r\n" in text:
-        new_text = new_text.replace("\n", "\r\n")     # preserve the original CRLF style on write
-    new_bytes = new_text.encode("utf-8")
+        display_lines(raw), display_lines(new_bytes),
+        fromfile=path, tofile=path + " (edited)"))
 
     if dry:
         return out({"status": "ok", "dry_run": True, "count": count,

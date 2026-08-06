@@ -4,7 +4,7 @@ Transparent remote hands for an AI coding agent: a Claude Code PreToolUse hook t
 redirects bash to a chosen remote host. Pure stdlib, Python >=3.11.
 
 ## Build / test / lint
-- Test:  `python -m unittest discover -s tests` (no tests committed yet — add under `tests/`)
+- Test:  `PYTHONPATH=src python -m unittest discover -s tests` (the suite is committed; add to it)
 - Lint:  `ruff check src/`
 - Format: `ruff format src/`
 - Install (editable): `pip install -e .`
@@ -31,7 +31,8 @@ bare command:
 Commands starting with `shunt ` always run locally (they do their own transport).
 
 ## Entry points
-- `src/shunt/cli.py` — the `shunt` CLI (`hosts|run|read|edit|cp|bg|get|log|install`); `main()` is
+- `src/shunt/cli.py` — the `shunt` CLI
+  (`hosts|run|read|edit|cp|bg|get|log|checkout|commit|install|help`); `main()` is
   the console-script entry. These are the operations the hook does NOT cover (one-shot remote
   command, file read/edit, rsync, background jobs, install). With no arguments it prints its own
   map (and exits 2 — a script that dropped its subcommand must not "succeed").

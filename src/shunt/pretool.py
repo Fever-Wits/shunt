@@ -22,7 +22,7 @@ we stay independent of undocumented env settings.
 CRITICAL: the rewritten command runs in a strict sandbox (root, no ~/.config/shunt, BUT network
 OK). That is why the client is the `ssh` binary, which is available in the sandbox.
 """
-import json, sys, os, shlex, time
+import json, sys, os, re, shlex, time     # `re` costs nothing extra — json loads it anyway
 
 try:
     from shunt import config
@@ -73,26 +73,78 @@ def warn(msg):
 DAYS_PER_MONTH = 30     # `drop_months` is a human unit, not a calendar one — see _trim_audit
 
 
-def audit(sid, alias, cmd):
-    """Record one redirected command; trim only if the log has grown past its ceiling.
+# ── one record = one line ──────────────────────────────────────────────────────
+# The log THINKS in records; every reader of it counts LINES — the trimmer dates a cut
+# from the head of a line, `shunt log -n N` shows N of them. A multi-line command written
+# raw breaks that equality, and the damage is quiet: the trimmer compares `line[:10]`
+# against the cutoff, so a continuation line starting with a space falls out (" " < "2")
+# while one starting with a letter survives ("p" > "2") — a kept, recent command loses
+# part of its body and the fragments look like records of their own. So the command is
+# folded onto one line on the way in and unfolded on the way out.
+UNESCAPES = {"n": "\n", "r": "\r", "\\": "\\"}
+
+
+def escape_cmd(cmd):
+    r"""Fold a command onto ONE line — the unit the log is counted and trimmed in.
+
+    The backslash is escaped FIRST and it is what makes the folding reversible: without
+    it a command that already contained the two characters `\` `n` would come back as a
+    newline. `\r` is here for the reader rather than the writer — python reads the log in
+    text mode, where a lone carriage return splits a line exactly as a newline does.
+    """
+    return cmd.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
+
+
+def unescape_cmd(text):
+    r"""The inverse of escape_cmd — the command as it was typed, for human eyes.
+
+    One left-to-right pass, not three replaces: `\\n` is an escaped backslash followed by
+    the letter n, and any order of replaces would read it as a newline. An unknown escape
+    (`\t` in a line written before folding existed) is left exactly as it lies.
+    """
+    out, i = [], 0
+    while i < len(text):
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if text[i] == "\\" and nxt in UNESCAPES:
+            out.append(UNESCAPES[nxt])
+            i += 2
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def audit(sid, alias, cmd, conf=None):
+    """Record one command sent to a host; trim if the log has grown past its ceiling.
 
     The log is an ARCHIVE, not a window: the question people bring to it is "where did we
     download that from, two months ago", and a short history answers it with silence.
     So size is the trigger and age is only the unit in which room gets freed.
 
     Trimming lives HERE rather than in someone's habit — a rule that needs remembering is
-    a rule that gets forgotten. Cost per command is a single `getsize`; at any ordinary
-    rate (~15 KB per six weeks) the ceiling is never reached at all, which is the point:
-    a fuse that blows regularly is a policy in disguise.
+    a rule that gets forgotten. The cost per recorded command is the append, one small
+    read of shunt.toml for the [audit] settings — the second of the run, since resolving
+    the host has already read the file — and one `getsize`. At any ordinary rate (~15 KB
+    per six weeks) the ceiling is never reached at all, which is the point: a fuse that
+    blows regularly is a policy in disguise.
+
+    `conf` lets the OTHER caller in: cli.py records its own subcommands here (the CLI is
+    the path we recommend to agents, so leaving it out of the log left the recommended
+    path unaudited) and passes its own config dir, the way config.py is called too — the
+    format is shared, the location stays with the caller. Absent → this hook's own.
 
     Fire-and-forget by design — an audit line must never break the command it records.
+
+    One command is ONE line: it goes in folded (see escape_cmd) and `shunt log` unfolds
+    it. A command that spans lines would otherwise be counted and trimmed as several.
     """
-    path = os.path.join(CONF, "audit.log")
+    conf = conf or CONF
+    path = os.path.join(conf, "audit.log")
     try:
         with open(path, "a") as f:
             f.write("%s sid=%s host=%s :: %s\n"
-                    % (time.strftime("%Y-%m-%dT%H:%M:%S"), sid, alias, cmd))
-        cfg = config.audit_settings(CONF)
+                    % (time.strftime("%Y-%m-%dT%H:%M:%S"), sid, alias, escape_cmd(cmd)))
+        cfg = config.audit_settings(conf)
         ceiling = int(cfg["trim_at_mb"] * 1_000_000)
         if os.path.getsize(path) > ceiling:
             _trim_audit(path, cfg["drop_months"], ceiling)
@@ -112,14 +164,90 @@ def _months_after(iso_date, months):
                          time.localtime(time.mktime(t) + months * DAYS_PER_MONTH * 86400))
 
 
+def _cut_date(oldest_line, drop_months):
+    """The date the age-cut runs to, or None when the oldest line carries no date.
+
+    A record always starts with one — unless a write was torn, something was appended by
+    hand, or the file was inherited from before commands were folded and this line is the
+    tail of one. Raising on that would be silent murder: the caller swallows
+    exceptions (an audit line may never break a command), so ONE unreadable line would
+    stop every future trim and the log would grow without a ceiling and without a word.
+    None instead, and the size cut below does the freeing — a fuse that gives up on a
+    bad line is not a fuse.
+    """
+    try:
+        return _months_after(oldest_line[:10], drop_months)
+    except (ValueError, OverflowError):
+        return None
+
+
+RECORD_HEAD = re.compile(r"\d{4}-\d{2}-\d{2}T")   # exactly how audit() opens every line
+
+
+def _has_date(line):
+    """True when the line OPENS a record — the date the trimmer and `shunt log` read.
+
+    Everything else is a continuation line from a log written before commands were
+    folded; it is the tail of the record above it, not a record of its own.
+
+    The SHAPE, not a parse: this runs once per line of the whole file, and the full
+    date arithmetic in _cut_date costs 24 µs a call — measured — which is a minute of
+    silence inside a hook when the trim finally fires on a 100 MB log. A date that has
+    the shape but no meaning (month 13) still resolves to None in _cut_date, where the
+    parse actually happens.
+    """
+    return RECORD_HEAD.match(line) is not None
+
+
+def log_records(lines):
+    """Group physical lines into RECORDS — one recorded command each, text and all.
+
+    Since commands are folded, a record IS a line and this is the identity. Logs written
+    before that hold commands whose body spilled over many lines; the spilled lines carry
+    no date, so they are given back to the record above instead of passing for records of
+    their own. That is what lets `-n N` mean N commands, and the trimmer drop N whole
+    commands, in an inherited file as well as a new one.
+
+    Shared with the CLI (`shunt log`) rather than copied: how the log is written and how
+    it is read back are one piece of knowledge, and a second copy drifts the day one side
+    changes.
+    """
+    records = []
+    for line in lines:
+        if records and not _has_date(line):
+            records[-1] += line          # inherited spill-over: rare, and records are short
+        else:
+            records.append(line)
+    return records
+
+
+def log_text(record):
+    """One record as a human reads it — the folded newlines put back.
+
+    Only the command is unfolded, because only the command was folded. A stray piece with
+    no ` :: ` at all comes from a log written before folding existed and is shown exactly
+    as it lies on disk — nothing there was written by us.
+    """
+    head, sep, cmd = record.partition(" :: ")
+    if not sep:
+        return record
+    return head + sep + unescape_cmd(cmd)
+
+
 def _trim_audit(path, drop_months, ceiling):
     """Free room by dropping the OLDEST `drop_months` of history — not by keeping only
     the newest ones. The distinction is the whole design: a log holding five years loses
     its first two months and keeps the rest.
 
     If that is not enough — everything in the file is recent, because something wrote a
-    month's worth of lines in an hour — the oldest lines go until it fits. Without this
-    the fuse fails in exactly the case it exists for.
+    month's worth of commands in an hour — the oldest records go until it fits. Without
+    this the fuse fails in exactly the case it exists for.
+
+    Both cuts work in RECORDS, never in lines. A command inherited from a log written
+    before folding spans several lines, and only the first of them carries a date: judging
+    the rest by `line[:10]` is a coin toss that mutilates a command it meant to keep, and
+    a size cut landing inside one leaves a dateless line at the front — which is the head
+    the NEXT trim dates its cut from, so age-trimming would then be dead for good.
 
     Written via a temp file and os.replace, so a crash mid-trim cannot leave half a log.
     ⚠ What falls out is gone for good.
@@ -132,16 +260,25 @@ def _trim_audit(path, drop_months, ceiling):
     if not lines:
         return
 
-    cutoff = _months_after(lines[0][:10], drop_months)   # oldest line dates the cut
-    kept = [line for line in lines if line[:10] >= cutoff]
+    records = log_records(lines)
+    cutoff = _cut_date(lines[0], drop_months)            # oldest line dates the cut
+    if cutoff is None:
+        # The oldest line has no readable date, so age cannot address anything. Size
+        # below still can — and it drops from the front, so the damaged line is the
+        # first to go.
+        kept = records
+    else:
+        # Every record starts on a dated line here: the first line is dated, so an
+        # undated one always has a record above it to belong to.
+        kept = [rec for rec in records if rec[:10] >= cutoff]
     if not kept:
-        # Every line falls inside the span we meant to drop: the log is not OLD, it is
+        # Every record falls inside the span we meant to drop: the log is not OLD, it is
         # FAST — a month's worth written in an hour. Age can free nothing here, and
-        # cutting by it would empty the file, losing the newest lines too. Leave it to
+        # cutting by it would empty the file, losing the newest records too. Leave it to
         # size below, which drops from the front and keeps the tail.
-        kept = lines
+        kept = records
 
-    total = sum(len(line) for line in kept)
+    total = sum(len(rec) for rec in kept)
     if total > ceiling:                     # last resort: the history itself is the flood
         start, acc = len(kept), 0
         while start > 0 and acc + len(kept[start - 1]) <= ceiling:
@@ -211,8 +348,9 @@ def resolve_host(alias):
     """Alias → {'alias', 'target', 'key'} or None.
 
     None also covers a broken config: a hook that raises would put a traceback in front
-    of every bash command. Falling back to LOCAL is the safe direction; `shunt hosts`
-    says what is wrong with the file.
+    of every bash command. What the caller does with the None is the other half — see
+    main(): a session routed somewhere unresolvable does not fall home, it refuses.
+    `shunt hosts` says what is wrong with the file.
     """
     try:
         return config.resolve(CONF, alias)
@@ -232,8 +370,11 @@ def ssh_command(host, cmd, sid):
     running there until it ends on its own — use `shunt bg` for long work.
     """
     key = host["key"]
-    sock = "/tmp/shunt-cm-%s-%%h-%%p.sock" % sid  # per-session AND PER-DESTINATION (%h/%p from ssh) —
-    # otherwise two different hosts in the same session → shared socket → commands go to the wrong host
+    sock = "/tmp/shunt-cm-%s-%%r@%%h:%%p.sock" % sid  # per-session AND PER-DESTINATION
+    # (%r/%h/%p filled in by ssh, same shape as the CLI's) — otherwise @web-01 then @web-02
+    # in the same session share one socket and commands go to the wrong host. %r is the
+    # USER: two aliases onto one machine with different accounts (the config allows it)
+    # would otherwise ride the first one's master and run as the wrong account.
     state = "/tmp/shunt-cwd-%s" % sid
     # trap EXIT captures the code + updates cwd on EVERY exit (incl. `exit N` in the command)
     trap_action = "rc=$?; pwd > %s 2>/dev/null; exit $rc" % shlex.quote(state)
@@ -324,8 +465,17 @@ def main():
     alias = read_target(sid)
     if alias:
         host = resolve_host(alias)
-        if not host:               # host disappeared from the config → fall back to local
-            sys.exit(0)
+        if not host:
+            # The session is routed to a host that no longer resolves — a renamed alias,
+            # a broken shunt.toml. Letting the command through unchanged runs it HERE,
+            # on the machine the caller believes they left, while `@status` still says
+            # REMOTE: `rm -rf /var/log/*` meant for a server deletes the local one.
+            # Refusing is not the same as a traceback in front of every command — the
+            # third option is the one @unknown already uses: say it, run nothing.
+            echo("[shunt] cannot resolve @%s — command NOT run (it would have run "
+                 "LOCALLY). Check `shunt hosts`, then `@%s` again or `@local`."
+                 % (alias, alias))
+            sys.exit(0)                # echo() already exits; said out loud, as above
         # sidecar: record active routing target + append to audit log (fire-and-forget)
         try:
             with open(os.path.join(CONF, "active-host." + sid), "w") as f:
