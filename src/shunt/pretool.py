@@ -221,7 +221,16 @@ def resolve_host(alias):
 
 
 def ssh_command(host, cmd, sid):
-    """ssh + ControlMaster; cwd is kept per session via a remote state-file."""
+    """ssh + ControlMaster; cwd is kept per session via a remote state-file.
+
+    Deliberately NO -tt, even though it would fix the one thing this transport does not
+    do — killing a command on the far side when the local ssh dies. Measured and
+    rejected: a pty makes `python3 -` (how `edit`/`commit` deliver their helper) never
+    see EOF, so those commands hang; every pager and stdin reader hangs with them; and
+    a controlling terminal EXISTS, so any program can open /dev/tty and block. That last
+    one is why a list of workarounds cannot close it. An interrupted command keeps
+    running there until it ends on its own — use `shunt bg` for long work.
+    """
     key = host["key"]
     sock = "/tmp/shunt-cm-%s-%%h-%%p.sock" % sid  # per-session AND PER-DESTINATION (%h/%p from ssh) —
     # otherwise two different hosts in the same session → shared socket → commands go to the wrong host

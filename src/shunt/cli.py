@@ -498,7 +498,13 @@ def cmd_commit(argv):
         remote_path = info["remote"]
         manifest_base_sha = info.get("base_sha")
 
-        host = resolve_host(alias)
+        # a manifest entry may outlive its host — report and keep going, one bad entry
+        # must not abandon the files after it
+        host = load_hosts().get(alias)
+        if not host:
+            print("SKIP %s — unknown host '%s' (not in the config)" % (local, alias))
+            overall_rc = 1
+            continue
         sa = ssh_argv(host)
 
         # get remote current sha via sha256sum

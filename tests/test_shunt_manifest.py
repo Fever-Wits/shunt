@@ -580,6 +580,43 @@ class TestCommitPush(unittest.TestCase):
             self.assertEqual(m[local]["base_sha"], new_sha)
             self.assertIn("ok", mock_out.getvalue())
 
+    def test_commit_skips_unknown_host_and_keeps_going(self):
+        """A manifest entry can outlive its host. One stale entry must not abandon the
+        files after it — commit reports it, sets a non-zero code, and carries on."""
+        with TmpConf() as conf:
+            local, base_sha = self._setup_conf(conf, b"content\n")
+
+            # a second entry whose host is no longer configured, ordered FIRST
+            stale = os.path.join(conf, "checkouts", "goneaway", "remote", "old.py")
+            os.makedirs(os.path.dirname(stale), exist_ok=True)
+            with open(stale, "wb") as f:
+                f.write(b"old\n")
+            m = shunt_mod._manifest_load()
+            m[stale] = {"host": "goneaway", "remote": "/remote/old.py",
+                        "base_sha": sha256(b"old\n")}
+            shunt_mod._manifest_save(m)
+
+            reached = {"good": False}
+
+            def fake_run(cmd, **kwargs):
+                reached["good"] = True          # only the surviving host gets here
+                r = MagicMock()
+                r.returncode = 0
+                r.stdout = (base_sha + "  /remote/file.py\n").encode()
+                r.stderr = b""
+                return r
+
+            with patch("subprocess.run", side_effect=fake_run):
+                with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+                    rc = shunt_mod.cmd_commit([])
+            output = mock_out.getvalue()
+
+        self.assertIn("SKIP", output)
+        self.assertIn("goneaway", output)
+        self.assertNotEqual(rc, 0)                    # the failure is reported
+        self.assertTrue(reached["good"],
+                        "the entry after the stale one was never processed")
+
     def test_commit_conflict_detected_before_push(self):
         """If remote sha differs from manifest base_sha, commit reports CONFLICT and does not push."""
         local_content = b"local edits\n"

@@ -73,6 +73,13 @@ and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
   prompt inside a script) and `ControlMaster`/`ControlPersist` (so it opened a fresh
   connection every time, for nothing). There is now one `ssh_opts()` both read from.
 
+- **`shunt commit` no longer stops at a stale manifest entry.** It walks every checked-out
+  file; when one entry named a host that is no longer configured, the whole run died — so
+  a single outdated entry silently dropped every file queued behind it, and the ones
+  already pushed gave no hint that the rest never went. It now reports that entry, sets a
+  non-zero exit code and carries on. The failure stays visible; it just stops taking
+  hostages. A manifest entry outliving its host is ordinary, not exceptional.
+
 ## [2026080613] — 2026-08-06
 
 ### Added
