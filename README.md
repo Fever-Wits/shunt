@@ -2,11 +2,11 @@
 
 **Transparent remote hands for an AI coding agent.**
 
-`shunt` is a Claude Code `PreToolUse(Bash)` hook that transparently redirects the
+`shunt` is a Claude Code `PreToolUse` hook that transparently redirects the
 agent's bash commands to a chosen remote machine — the agent keeps running plain
 `ls`, `grep`, `make`, and each one executes on the host you've switched to, with
 per-session working directory kept across commands. Alongside the hook ships a small
-`shunt` CLI for the things bash alone can't do well over a wire: `read`, `edit`,
+`shunt` CLI for the things bash alone can't do well over a wire: `run`, `read`, `edit`,
 `cp`, `bg`, `get`, `log`, `checkout`, and `commit`.
 
 What you can do: **edit remote files** with your normal local tools · **run commands transparently** on a remote host · **long tasks** in the background with `bg` + `--status` to monitor.
@@ -42,7 +42,7 @@ The CLI is only half of shunt. The transparent redirection comes from the
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
@@ -57,6 +57,11 @@ The CLI is only half of shunt. The transparent redirection comes from the
 
 Use the absolute path to `pretool.py` in your clone (or wherever the package was
 installed). `shunt install` will print the exact line for you.
+
+**The matcher is wider than `Bash` on purpose.** Only `Bash` is ever rewritten; the
+other tools are matched so the hook can *warn* that the mode does not cover them — see
+[Where the mode stops](#where-the-mode-stops). Register only `Bash` and you keep the
+redirection but lose the warnings.
 
 **Restart the Claude Code session** after editing `settings.json` — hooks are read
 at session start.
@@ -118,6 +123,21 @@ each routed command to `~/.config/shunt/audit.log`.
 `shunt ...` commands themselves always run locally — the CLI does its own
 transport, so it is never redirected.
 
+### Where the mode stops
+
+**The mode covers `bash` and nothing else.** File tools (`Read`, `Write`, `Edit`,
+`MultiEdit`, `NotebookEdit`) keep reading the **local** disk while the session feels
+remote, and a spawned agent **inherits** the mode and runs its own commands on the far
+machine — reading absent local files as facts about the world. Both failures are silent,
+so the hook says them out loud instead: it warns when an agent is spawned in remote mode,
+and once per host when a file tool runs there.
+
+It **never blocks** — working remotely with a local file is legitimate as often as it is
+a mistake; only the silence was the defect. For a remote file use `shunt read` /
+`shunt edit` / `shunt checkout`; for an agent that genuinely must work on the far
+machine, give it `shunt run @host …` explicitly rather than leaving the session in
+remote mode.
+
 ### `shunt hosts`
 
 Print the configured hosts.
@@ -131,6 +151,26 @@ web-02       user@203.0.113.20
 
 The hosts as **resolved**, with the file they came from on the first line — not the raw
 text, which may be in either supported format.
+
+### `shunt run @host <cmd>` — for scripts, cron and agents
+
+The `@<alias>` toggle works on **interactive** bash: the hook needs a session to know
+where that session is routed. A script, a cron job or a spawned sub-agent has no mode of
+its own, so `shunt run` executes one command explicitly and passes the output and the
+exit code straight through.
+
+```bash
+shunt run @web-01 hostname
+shunt run @web-01 "ls /etc | wc -l"       # quoted → the pipe runs on the server
+```
+
+Quoting: a **single** argument is handed over verbatim, so pipes, redirects and `$(…)`
+survive; **several** arguments are re-quoted, so `shunt run @web-01 echo "a b"` stays two
+words on the far side.
+
+This is also the explicit path for an agent that must work on another machine — better
+than leaving the session in remote mode and letting the agent inherit it silently (see
+[Where the mode stops](#where-the-mode-stops)).
 
 ### `shunt read @host <file> [start:end]`
 
@@ -224,6 +264,11 @@ $ shunt log -n 20
 2026-06-23T10:15:09 sid=… host=web-01 :: make -j8 all
 ```
 
+The log is an **archive**, and trimming it is a **fuse**, not a retention policy: it is
+left alone until it grows past `trim_at_mb`, and only then do the oldest `drop_months`
+of history go — the rest stays. Both are configurable, see
+[Configuration](#configuration). At any ordinary rate the ceiling is never reached.
+
 ### Edit remote files (`checkout` / `commit`)
 
 `checkout` pulls a remote file to a local sandbox so you can edit it with normal
@@ -277,6 +322,20 @@ identity over in `~/.ssh/config` breaks silently the day only one of them is edi
 machines added on one side, the identity left on the other, and access is gone without a
 word. A broken config is loud rather than empty: the CLI says what is wrong with the file
 instead of resolving to no hosts.
+
+An optional `[audit]` section tunes the audit log:
+
+```toml
+[audit]
+trim_at_mb  = 100    # trim only once the log grows past this
+drop_months = 2      # then the OLDEST months go — the rest of the history stays
+```
+
+Size is the trigger; age is only the unit in which room gets freed. Should everything in
+the file be recent — something wrote a month's worth of lines in an hour — the oldest
+lines go until it fits, because otherwise the fuse would fail in exactly the case it
+exists for. Bad or missing values fall back to the defaults above: a setting must never
+be the reason a command fails.
 
 See [`shunt.toml.example`](shunt.toml.example).
 

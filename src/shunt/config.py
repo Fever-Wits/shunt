@@ -65,6 +65,39 @@ def resolve(conf_dir, alias):
     return load_hosts(conf_dir).get(alias.lstrip("@"))
 
 
+AUDIT_DEFAULTS = {"trim_at_mb": 100, "drop_months": 2}
+
+
+def audit_settings(conf_dir):
+    """The [audit] section, with defaults for whatever is unset.
+
+        [audit]
+        trim_at_mb  = 100    # size at which trimming fires
+        drop_months = 2      # how much of the OLDEST history goes when it does
+
+    The defaults say what the log IS: an archive, with trimming as a fuse rather than a
+    policy. 100 MB is out of reach at any ordinary rate (measured: ~15 KB per six weeks),
+    and that is the intent — a fuse that blows regularly is a policy in disguise. Keeping
+    the history long is the whole point: the question people bring to an audit log is
+    "where did we download that from, two months ago", and a short window answers it with
+    silence.
+
+    Bad or missing values fall back to the defaults rather than raising: the log must
+    never be the reason a command fails.
+    """
+    out = dict(AUDIT_DEFAULTS)
+    try:
+        with open(os.path.join(conf_dir, TOML_NAME), "rb") as f:
+            section = tomllib.load(f).get("audit") or {}
+    except Exception:
+        return out
+    for key in out:
+        value = section.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            out[key] = value
+    return out
+
+
 def add_host(conf_dir, alias, target, key=None):
     """Write the host into shunt.toml and return the line written.
 

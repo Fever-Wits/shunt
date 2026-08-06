@@ -31,12 +31,17 @@ bare command:
 Commands starting with `shunt ` always run locally (they do their own transport).
 
 ## Entry points
-- `src/shunt/cli.py` — the `shunt` CLI (`hosts|read|edit|cp|bg|get|log|install`); `main()` is the
-  console-script entry. These are the operations the hook does NOT cover (file read/edit, rsync,
-  background jobs, install).
-- `src/shunt/pretool.py` — the PreToolUse hook (matcher: Bash); does the transparent `@host`
-  redirection via `updatedInput`. It is wired into `settings.json` by absolute path, so it may
-  be launched as a plain script — hence the sys.path fallback guarding its `shunt.config` import.
+- `src/shunt/cli.py` — the `shunt` CLI (`hosts|run|read|edit|cp|bg|get|log|install`); `main()` is
+  the console-script entry. These are the operations the hook does NOT cover (one-shot remote
+  command, file read/edit, rsync, background jobs, install). With no arguments it prints its own
+  map (and exits 2 — a script that dropped its subcommand must not "succeed").
+- `src/shunt/pretool.py` — the PreToolUse hook (matcher:
+  `Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit`); does the transparent `@host` redirection
+  via `updatedInput`. Only **Bash** is rewritten — the other tools are matched so the hook can
+  warn that the mode does not cover them, and it never blocks. Keep the matcher printed by
+  `cli.py:HOOK_MATCHER`, the README snippet and `pretool.FILE_TOOLS` in step. It is wired into
+  `settings.json` by absolute path, so it may be launched as a plain script — hence the sys.path
+  fallback guarding its `shunt.config` import.
 - `src/shunt/config.py` — the host configuration (`shunt.toml`, legacy `hosts` as fallback).
   The ONLY module that knows either format; CLI and hook both resolve through it. Do not
   re-parse hosts anywhere else.

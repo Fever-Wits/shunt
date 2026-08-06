@@ -6,6 +6,8 @@ pretool.py (hook) = transparent EXECUTION of bare bash commands (@host mode).
 shunt CLI (this file) = the special operations:
 
   shunt hosts                              the configured hosts
+  shunt run   @host <cmd>                  one command remotely — for scripts, cron and
+                                           agents, which have no session and thus no mode
   shunt read  @host <file> [start:end]     content with line numbers (for orientation)
   shunt edit  @host <file> OLD NEW         edit by CONTENT (edit_helper on the other side)
               [--expected N] [--dry-run]
@@ -60,17 +62,66 @@ def resolve_host(alias):
 
 
 def ssh_argv(host):
-    a = ["ssh"]
-    k = host["key"]
-    if k:
-        a += ["-i", k]
-    a += ["-o", "StrictHostKeyChecking=accept-new", "-o", "ControlMaster=auto",
-          "-o", "ControlPath=" + SOCK, "-o", "ControlPersist=300",
-          "-o", "BatchMode=yes", host["target"]]
-    return a
+    """The ssh call every subcommand shares.
+
+    Deliberately NO -tt: `edit` and `commit` hand the helper its source over ssh stdin,
+    and through a pty that source never reaches EOF — python drops into its REPL and the
+    command hangs. Measured and rejected in ARCHITECTURE.md, together with the rest of
+    the cost (pagers, colours, merged stderr).
+    """
+    return ["ssh"] + ssh_opts(host) + [host["target"]]
+
+
+def ssh_opts(host):
+    """The ssh options every hand shares — ONE place, so they cannot drift apart.
+
+    Most hands want them as argv (see ssh_argv); `cp` wants them as a string for rsync's
+    -e. Both start here, because they were once written twice and the copy fell behind:
+    it lacked BatchMode (so `cp` could hang on a password prompt in a script) and
+    ControlMaster (so it opened a fresh connection every time, for nothing).
+    """
+    opts = []
+    if host["key"]:
+        opts += ["-i", host["key"]]
+    opts += ["-o", "StrictHostKeyChecking=accept-new", "-o", "ControlMaster=auto",
+             "-o", "ControlPath=" + SOCK, "-o", "ControlPersist=300",
+             "-o", "BatchMode=yes"]
+    return opts
 
 
 # ── subcommands ──────────────────────────────────────────────────────────────
+MAP = """shunt — transparent remote hands. A bare bash command runs on the chosen machine.
+
+  I want to…                      → reach for
+  ──────────────────────────────────────────────────────────────────────────
+  …work over there                  @<alias>          then just write bash
+  …see where I am / come back       @status  ·  @local
+  …run ONE command, no session      shunt run   @host CMD
+  …look at a file over there        shunt read  @host FILE [start:end]
+  …change a file over there         shunt edit  @host FILE OLD NEW
+  …edit heavily, with full tools    shunt checkout @host FILE → edit → shunt commit
+  …move files between machines      shunt cp    SRC DST        (one side @host:/path)
+  …start something long             shunt bg    @host CMD      (survives disconnect)
+  …download onto the server         shunt get   @host URL
+  …see what was sent where          shunt log   [-n N]
+  …add a machine                    shunt install user@host [--alias NAME]
+  …list the machines                shunt hosts
+
+  ⚠ The mode covers BASH ONLY.
+    Read/Write/Edit keep touching the LOCAL disk, and a spawned agent INHERITS the
+    mode and runs its bash on the far machine — reading absent local files as facts.
+    Remote file → `shunt read/edit`.  Agent that must work there → `shunt run`.
+
+  Full docs: README.md (usage) · ARCHITECTURE.md (why it is built this way).
+"""
+
+
+def cmd_help(argv=None):
+    """Print the map. `shunt` with no arguments lands here — asking is not an error."""
+    sys.stdout.write(MAP)
+    return 0
+
+
 def cmd_hosts(argv):
     """The configured hosts, resolved — not the raw file, which may be either format."""
     path = config.config_path(CONF)
@@ -84,6 +135,27 @@ def cmd_hosts(argv):
     if not hosts:
         print("(no hosts configured)")
     return 0
+
+
+def cmd_run(argv):
+    """shunt run @host <cmd> — one command on the host; output and exit code pass through.
+
+    The hook covers INTERACTIVE bash: it needs a session to know where that session is
+    routed. A script, a cron job or a spawned agent has no mode of its own, so without
+    this they reach for raw ssh and go around the tool entirely.
+
+    It is also the EXPLICIT path for an agent. Until now the only way to make an agent
+    work on another machine was to leave the session in remote mode and let it inherit
+    that silently — the very trap the hook now warns about. This gives somewhere to
+    stand instead of only something to avoid.
+    """
+    if len(argv) < 2:
+        die("usage: shunt run @host <cmd>   (quote the command to keep pipes/redirects)")
+    host = resolve_host(argv[0])
+    # one argument → passed through verbatim, so `shunt run @h "ls | wc -l"` keeps its pipe
+    # several → re-quoted, so `shunt run @h echo "a b"` stays two words, not three
+    cmd = argv[1] if len(argv) == 2 else shlex.join(argv[1:])
+    return subprocess.run(ssh_argv(host) + [cmd]).returncode
 
 
 def cmd_read(argv):
@@ -146,10 +218,8 @@ def cmd_cp(argv):
     h = host["ref"]
     if not h:
         die("at least one side must be @host:/path")
-    e = "ssh -o ControlPath=%s -o StrictHostKeyChecking=accept-new" % SOCK
-    k = h["key"]
-    if k:
-        e += " -i " + shlex.quote(k)
+    # rsync takes its ssh command as ONE string — same options as every other hand
+    e = "ssh " + " ".join(shlex.quote(o) for o in ssh_opts(h))
     return subprocess.run(["rsync", "-az", "--info=progress2", "-e", e, rsrc, rdst]).returncode
 
 
@@ -234,11 +304,21 @@ def cmd_get(argv):
     return subprocess.run(ssh_argv(host) + [remote]).returncode
 
 
+HOOK_MATCHER = "Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit"
+
+
 def _print_hook_hint():
-    """hook instruction (we do NOT touch someone else's settings.json automatically)."""
+    """hook instruction (we do NOT touch someone else's settings.json automatically).
+
+    The matcher is wider than Bash on purpose. Only Bash is ever rewritten; the rest are
+    matched so the hook can WARN that the mode does not cover them (see pretool.py). Print
+    the narrow one and a fresh install silently loses those warnings — which is how this
+    was found: the local setup only had them because a human had widened it by hand.
+    """
     print("\nTo activate, add to ~/.claude/settings.json → hooks.PreToolUse (if not already there):")
-    print('  { "matcher": "Bash", "hooks": [ { "type": "command",')
-    print('    "command": "python3 %s/pretool.py" } ]  }' % SELF_DIR)
+    print('  { "matcher": "%s",' % HOOK_MATCHER)
+    print('    "hooks": [ { "type": "command",')
+    print('      "command": "python3 %s/pretool.py" } ] }' % SELF_DIR)
     print("  (requires restarting the Claude Code session)")
 
 
@@ -488,15 +568,23 @@ def cmd_commit(argv):
 
 
 def main():
+    # Asking (`-h`) and forgetting (no arguments) both deserve the map — but they are
+    # not the same event. Asking succeeds; a missing subcommand is an error, or a script
+    # that dropped an argument would silently "succeed". Map to stdout either way, so a
+    # human reading the terminal sees it; only the exit code tells them apart.
+    if sys.argv[1:2] and sys.argv[1] in ("help", "-h", "--help"):
+        sys.exit(cmd_help())
     if len(sys.argv) < 2:
-        die("usage: shunt {hosts|read|edit|cp|bg|get|log|install|checkout|commit} ...")
+        cmd_help()
+        sys.exit(2)
     sub, argv = sys.argv[1], sys.argv[2:]
-    fns = {"hosts": cmd_hosts, "read": cmd_read, "edit": cmd_edit,
+    fns = {"hosts": cmd_hosts, "run": cmd_run, "read": cmd_read, "edit": cmd_edit,
            "cp": cmd_cp, "bg": cmd_bg, "get": cmd_get, "log": cmd_log,
-           "install": cmd_install, "checkout": cmd_checkout, "commit": cmd_commit}
+           "install": cmd_install, "checkout": cmd_checkout, "commit": cmd_commit,
+           "help": cmd_help}
     fn = fns.get(sub)
     if not fn:
-        die("unknown subcommand: %s" % sub)
+        die("unknown subcommand: %s (run `shunt` for the map)" % sub)
     sys.exit(fn(argv) or 0)
 
 

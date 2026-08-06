@@ -105,19 +105,22 @@ class TestFnsDict(unittest.TestCase):
             self.assertIn(fn_name, dir(shunt_mod),
                           "Missing subcommand function: %s" % fn_name)
 
-    def test_main_lists_checkout_commit_in_usage(self):
-        """main() with no args prints usage that includes checkout and commit."""
+    def test_main_lists_checkout_commit_in_map(self):
+        """main() with no args prints the map, and the map includes checkout and commit.
+
+        No arguments is the tool's self-introduction (the map on stdout — shunt is not
+        an MCP server and this is its only way to explain itself in one call) AND a
+        missing subcommand (exit 2). Whatever it prints must name every subcommand.
+        See tests/test_shunt_help.py.
+        """
         with patch.object(sys, "argv", ["shunt"]):
-            with self.assertRaises(SystemExit):
-                # die() writes to stderr and sys.exit(2)
-                with patch("sys.stderr", new_callable=io.StringIO) as mock_err:
-                    try:
-                        shunt_mod.main()
-                    except SystemExit:
-                        err = mock_err.getvalue()
-                        self.assertIn("checkout", err)
-                        self.assertIn("commit", err)
-                        raise
+            with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+                with self.assertRaises(SystemExit) as ctx:
+                    shunt_mod.main()
+                out = mock_out.getvalue()
+        self.assertEqual(ctx.exception.code, 2)   # no-args = missing subcommand = error
+        self.assertIn("checkout", out)
+        self.assertIn("commit", out)
 
     def test_unknown_subcommand_exits_nonzero(self):
         """Unknown subcommand causes SystemExit with non-zero code."""

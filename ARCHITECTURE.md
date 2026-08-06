@@ -20,18 +20,20 @@ shunt is four Python modules with zero third-party dependencies (stdlib only).
 
 | Module | Role | Where it runs |
 |---|---|---|
-| `pretool.py` | `PreToolUse` Bash hook — transparent execution by command rewrite | Local (agent host) |
-| `cli.py` | the `shunt` CLI — read / edit / cp / bg / get / log / hosts / install | Local (agent host) |
+| `pretool.py` | `PreToolUse` hook — transparent execution by command rewrite | Local (agent host) |
+| `cli.py` | the `shunt` CLI — run / read / edit / cp / bg / get / log / hosts / install | Local (agent host) |
 | `config.py` | the host configuration — the only module that knows its format | Local (agent host) |
 | `edit_helper.py` | server-side edit-by-content (SHA lock + atomic write + verify) | Remote machine (or local) |
 
 ### 1.1 `pretool.py` — the transparent-execution hook
 
-`pretool.py` is registered as a `PreToolUse` hook with the matcher `Bash`. On
-every bash command the agent issues, the agent host invokes the hook with the
-tool call as JSON on stdin. The hook decides whether the command should run
-locally (do nothing) or remotely (rewrite it), and returns its decision as JSON
-on stdout:
+`pretool.py` is registered as a `PreToolUse` hook with the matcher
+`Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit`. Only `Bash` is ever
+rewritten; the wider matcher exists for the mode-boundary warnings (§3, *Where
+the mode stops*). On every bash command the agent issues, the agent host invokes
+the hook with the tool call as JSON on stdin. The hook decides whether the
+command should run locally (do nothing) or remotely (rewrite it), and returns
+its decision as JSON on stdout:
 
 ```json
 { "hookSpecificOutput": {
@@ -47,7 +49,7 @@ streams its stdout/stderr live, and still gets a real exit code. From the
 agent's point of view nothing changed — it sees the output of `ls`, except `ls`
 ran on another machine.
 
-The hook handles four kinds of input:
+The hook handles four kinds of bash input:
 
 1. **Switch commands** (`@<alias>`, `@local`, `@status`) — update per-session
    routing state and echo a confirmation.
@@ -56,6 +58,9 @@ The hook handles four kinds of input:
 3. **Bare bash, routed to a remote host** — rewritten into an `ssh` invocation.
 4. **Already-rewritten commands** — detected by a marker and passed through
    (double-rewrite guard).
+
+Every other matched tool takes the second job of the file — the warnings of §3,
+*Where the mode stops* — and is otherwise left exactly as it came.
 
 ### 1.2 `cli.py` — the `shunt` CLI
 
@@ -66,6 +71,7 @@ The CLI covers them, over the same ssh transport as the hook.
 | Subcommand | What it does |
 |---|---|
 | `shunt hosts` | print the configured hosts |
+| `shunt run @host <cmd>` | one command on the host, no session needed; output and exit code pass through |
 | `shunt read @host <file> [start:end]` | content with line numbers (orientation); `cat -n` or an `awk` line-range |
 | `shunt edit @host <file> OLD NEW [--expected N] [--dry-run]` | edit by content via `edit_helper.py` on the far side |
 | `shunt edit @host <file> --stdin` | same, with a JSON payload from stdin (multi-line / binary-safe) |
@@ -75,6 +81,12 @@ The CLI covers them, over the same ssh transport as the hook.
 | `shunt get @host <url> [dest]` | server-side background download (`wget -b`) |
 | `shunt log [-n N]` | tail the local audit log |
 | `shunt install user@host [--alias A] [--key PATH]` | provision a host |
+
+`shunt run` exists because the hook covers **interactive** bash: it needs a
+session to know where that session is routed. A script, a cron job or a spawned
+sub-agent has none, so it names the host explicitly instead. Quoting follows the
+same split: a single argument is handed over verbatim (pipes and redirects
+survive), several arguments are re-quoted (so `echo "a b"` stays two words).
 
 `shunt bg` uses transient `systemd-run` units (`--collect
 --remain-after-exit`), so a long job **survives the ssh disconnect** and its
@@ -153,6 +165,37 @@ On each routed command the hook also:
 Both are fire-and-forget — a failure to write them never blocks command
 execution. If the active alias no longer resolves to a configured host, the hook
 **falls back to local** rather than erroring.
+
+### Where the mode stops
+
+The mode covers **bash and nothing else**: the hook rewrites `Bash` and no other
+tool. File tools keep touching the local disk while the session feels remote, and
+a spawned agent inherits the routing and runs its own bash on the far machine —
+reading absent local files as facts about the world. Both failures are silent,
+which is why the wider matcher exists: on every matched non-bash tool the hook
+answers with `additionalContext` instead of `updatedInput`.
+
+- **`Agent`** — warned on **every** spawn; each one inherits the mode anew, so a
+  once-per-session warning would miss all the later ones.
+- **`Read` / `Write` / `Edit` / `MultiEdit` / `NotebookEdit`** — warned **once per
+  host** (state in `<conf>/warned.<session_id>`, cleared by `@local`). Keyed by
+  host rather than by session: switching `@web-01 → @web-02` warns again, because
+  the old warning no longer describes where the tools are pointed.
+
+It **never blocks** — remote mode plus a local file is legitimate as often as it
+is a mistake; only the silence was the defect. The whole branch is wrapped
+fail-open: an error inside it can never break someone else's tool call.
+
+### The audit log is an archive; trimming it is a fuse
+
+`audit.log` is written to be *read months later* ("where did we download that
+from?"), so nothing is dropped on a schedule. Size is the trigger: past
+`trim_at_mb` the oldest `drop_months` of history go and the rest stays — a log
+holding five years loses its first two months, not everything but the last two.
+If age can free nothing — the file is not old but *fast*, a month's worth of
+lines written in an hour — the oldest lines go until it fits, because otherwise
+the fuse would fail in exactly the case it exists for. The rewrite goes through a
+temp file and `os.replace`, so a crash mid-trim cannot leave half a log.
 
 ### The rewrite marker and the double-rewrite guard
 
@@ -239,11 +282,13 @@ All local state lives under `~/.config/shunt/` (override with `SHUNT_CONF`):
 ```
 shunt.toml                 the hosts:  alias = "user@host", or the inline-table form
                              { target = "user@host", key = "~/.ssh/id" };
-                             a top-level `key` is the default identity
+                             a top-level `key` is the default identity;
+                             an optional [audit] section tunes trim_at_mb / drop_months
 hosts                      the previous format, still read when shunt.toml is absent:
                              <alias> ssh <target> [key=PATH]  (one host per line)
 target.<session_id>        active alias for a session (absent = local)
 active-host.<session_id>   sidecar: current routing target (for status displays)
+warned.<session_id>        the host this session was already warned about (see §3)
 audit.log                  one line per routed command
 ```
 

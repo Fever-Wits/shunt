@@ -19,3 +19,17 @@ web-02 = "user@203.0.113.20"
 #
 # `shunt install user@host [--alias NAME] [--key PATH]` writes an entry here for you
 # (the same alias is replaced, never duplicated) and leaves the rest of the file alone.
+
+
+# The audit log (~/.config/shunt/audit.log, read with `shunt log`) is an ARCHIVE, and
+# trimming it is a FUSE — not a retention policy. Size is the trigger; age is only the
+# unit in which room gets freed. The question people bring to this file is "where did we
+# download that from, two months ago", and a short window answers it with silence.
+#
+# At any ordinary rate the ceiling is never reached (measured: ~15 KB per six weeks).
+# That is intended: a fuse that blows regularly is a policy in disguise.
+[audit]
+trim_at_mb  = 100    # trim only once the log grows past this
+drop_months = 2      # then the OLDEST months go — the rest of the history stays
+                     # (if everything in the file is recent — something wrote a month's
+                     #  worth in an hour — the oldest lines go until it fits)

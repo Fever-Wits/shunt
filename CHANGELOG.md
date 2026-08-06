@@ -5,6 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
+## [2026080614] — 2026-08-06
+
+### Added
+
+- **`shunt run @host <cmd>`** — one command on a host, without a session.
+
+  ```bash
+  shunt run @web-01 hostname
+  shunt run @web-01 "ls /etc | wc -l"       # quoted → the pipe runs on the server
+  ```
+
+  **Why:** the hook covers **interactive** bash — it needs a session to know where that
+  session is routed. A script, a cron job or a spawned sub-agent has no mode of its own,
+  so until now the only way to make an agent work on another machine was to leave the
+  session in remote mode and let the agent inherit it *silently* — the very trap the
+  warnings below are about. `run` gives somewhere to stand instead of only something to
+  avoid.
+
+  Quoting: a **single** argument passes through verbatim, so pipes, redirects and `$(…)`
+  survive; **several** arguments are re-quoted, so `shunt run @h echo "a b"` stays two
+  words on the far side. The remote exit code is passed through, not swallowed.
+
+- **Warnings at the boundary of the mode.** The hook now also sees `Agent`, `Read`,
+  `Write`, `Edit`, `MultiEdit` and `NotebookEdit`, and says out loud that the mode does
+  **not** cover them: only `Bash` is ever rewritten. A spawned agent is warned on every
+  spawn (each one inherits the routing anew); a file tool once per host (switching hosts
+  re-arms it, `@local` clears it).
+
+  It **never blocks** — working remotely with a local file is legitimate as often as it
+  is a mistake; only the silence was the defect. The branch is fail-open: an error inside
+  it can never break someone else's tool call.
+
+  **This changes the hook registration.** The matcher is now
+  `Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit` — see the README. Keeping the old
+  `Bash`-only matcher leaves the redirection working exactly as before and simply loses
+  the warnings; `shunt install` now prints the wider line.
+
+- **`shunt` with no arguments introduces itself** — an "I want to… → reach for" map
+  instead of a usage line. shunt is not an MCP server; nothing announces it to whoever
+  reaches for it, so this is its only way to explain itself in one call without loading
+  documentation. Asking (`shunt help`, `-h`, `--help`) exits **0**; the bare call prints
+  the same map but exits **2**, because a script that dropped its subcommand must not
+  silently "succeed".
+
+- **The audit log trims itself**, configured by a new `[audit]` section:
+
+  ```toml
+  [audit]
+  trim_at_mb  = 100    # trim only once the log grows past this
+  drop_months = 2      # then the OLDEST months go — the rest of the history stays
+  ```
+
+  The log is an **archive** and trimming is a **fuse**, not a retention policy: size is
+  the trigger, and age is only the unit in which room gets freed. A log holding five
+  years loses its first two months and keeps the rest. If age can free nothing — the file
+  is not old but *fast*, a month's worth of lines written in an hour — the oldest lines
+  go until it fits, because otherwise the fuse would fail in exactly the case it exists
+  for. Bad or missing values fall back to the defaults above; a setting must never be the
+  reason a command fails.
+
+### Fixed
+
+- **`shunt cp` now gets the same ssh options as every other subcommand.** They were
+  written twice — once for `ssh`, once inside `cmd_cp` for `rsync -e` — and the copy had
+  fallen behind: it lacked `BatchMode=yes` (so `cp` could sit forever on a password
+  prompt inside a script) and `ControlMaster`/`ControlPersist` (so it opened a fresh
+  connection every time, for nothing). There is now one `ssh_opts()` both read from.
+
 ## [2026080613] — 2026-08-06
 
 ### Added
