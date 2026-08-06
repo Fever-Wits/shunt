@@ -11,15 +11,16 @@ redirects bash to a chosen remote host. Pure stdlib, Python >=3.11.
 
 ## Hard invariant — stdlib only
 `dependencies = []` in `pyproject.toml`. NEVER add a third-party runtime dependency — ever.
-The hook and the inline daemon client run inside a restricted sandbox (root, no `~/.config/shunt`,
-network OK) with only the system `python3` and `ssh`; an import of anything non-stdlib breaks them.
+The hook runs inside a restricted sandbox (root, no `~/.config/shunt`, network OK) with only the
+system `python3` and `ssh`, and the helpers are deployed inline to servers that may have nothing
+but `python3`; an import of anything non-stdlib breaks them.
 Keep it stdlib. (`ruff`/`hatchling` are dev/build tools, not runtime deps.)
 
 ## Critical safety gotcha
-shunt executes **arbitrary remote commands**. The `nonsecure` daemon mode (`daemon.py`) listens on
-a TCP port and grants a shell to anyone with the token. NEVER point the nonsecure daemon at an
-untrusted network — it must bind `127.0.0.1` (default) or a trusted LAN only; for anything else use
-`secure` (ssh) mode, which opens no port and shares no token. Do not weaken this default.
+shunt executes **arbitrary remote commands** with the full rights of the ssh user in the host's
+target — it does not filter or confine them. The transport is ssh and only ssh: no listening port,
+no shared secret, nothing of shunt's installed on the server. Do not weaken that — a transport that
+opens a port on the server is a shell for whoever reaches it.
 
 ## @host switching convention (per-session)
 The hook rewrites bash based on a per-session target file. The agent toggles routing by issuing a
@@ -35,5 +36,4 @@ Commands starting with `shunt ` always run locally (they do their own transport)
   background jobs, install).
 - `src/shunt/pretool.py` — the PreToolUse hook (matcher: Bash); does the transparent `@host`
   redirection via `updatedInput`.
-- `src/shunt/daemon.py` — the nonsecure TCP+token transport that runs on the server.
 - `src/shunt/edit_helper.py` — content-based remote edit helper, shipped inline over ssh.

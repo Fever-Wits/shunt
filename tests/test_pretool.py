@@ -1,6 +1,6 @@
 """
-Tests for shunt.pretool — pure logic only; no real SSH / no real sockets.
-Drives: resolve_host, ssh_command, daemon_command, REWRITE_MARKER guard,
+Tests for shunt.pretool — pure logic only; no real SSH.
+Drives: resolve_host, ssh_command, REWRITE_MARKER guard,
 shunt-CLI passthrough guard, and @-switch parsing.
 """
 
@@ -42,22 +42,20 @@ class _PretoolBase(unittest.TestCase):
 class TestResolveHost(_PretoolBase):
     HOSTS_CONTENT = (
         "# comment line\n"
-        "host-a daemon 203.0.113.84:8766 key=~/.ssh/id_ed25519\n"
+        "host-a ssh   user@203.0.113.84 key=~/.ssh/id_ed25519\n"
         "raspi  ssh   pi@203.0.113.99\n"
     )
 
-    def test_known_daemon_host(self):
+    def test_known_host_with_key(self):
         h = self.pt.resolve_host("host-a")
         self.assertIsNotNone(h)
         self.assertEqual(h["alias"], "host-a")
-        self.assertEqual(h["transport"], "daemon")
-        self.assertEqual(h["target"], "203.0.113.84:8766")
+        self.assertEqual(h["target"], "user@203.0.113.84")
         self.assertIn("key=~/.ssh/id_ed25519", h["opts"])
 
     def test_known_ssh_host(self):
         h = self.pt.resolve_host("raspi")
         self.assertIsNotNone(h)
-        self.assertEqual(h["transport"], "ssh")
         self.assertEqual(h["target"], "pi@203.0.113.99")
         self.assertEqual(h["opts"], [])
 
@@ -187,73 +185,6 @@ class TestSshCommandShape(_PretoolBase):
         h = _pt.resolve_host("keyhost")
         result = _pt.ssh_command(h, "ls", "s1")
         self.assertIn("-i", result)
-
-
-class TestDaemonCommandShape(_PretoolBase):
-    HOSTS_CONTENT = "dbox daemon 203.0.113.84:9000\n"
-
-    def _write_token(self, token):
-        with open(os.path.join(self._tmpdir, "token.dbox"), "w") as f:
-            f.write(token)
-
-    def test_starts_with_rewrite_marker(self):
-        self._write_token("secret123")
-        h = self.pt.resolve_host("dbox")
-        result = self.pt.daemon_command(h, "echo hi", "sid1")
-        self.assertTrue(result.startswith(self.pt.REWRITE_MARKER))
-
-    def test_contains_python3(self):
-        self._write_token("secret123")
-        h = self.pt.resolve_host("dbox")
-        result = self.pt.daemon_command(h, "echo hi", "sid1")
-        self.assertIn("python3", result)
-
-    def test_contains_host_and_port(self):
-        self._write_token("tok")
-        h = self.pt.resolve_host("dbox")
-        result = self.pt.daemon_command(h, "ls", "sid2")
-        self.assertIn("203.0.113.84", result)
-        self.assertIn("9000", result)
-
-    def test_default_port_when_no_port_in_target(self):
-        hosts = "noport daemon 203.0.113.5\n"
-        with open(os.path.join(self._tmpdir, "hosts"), "w") as f:
-            f.write(hosts)
-        with open(os.path.join(self._tmpdir, "token.noport"), "w") as f:
-            f.write("t")
-        import importlib
-        import shunt.pretool as _pt
-
-        importlib.reload(_pt)
-        h = _pt.resolve_host("noport")
-        result = _pt.daemon_command(h, "pwd", "s")
-        self.assertIn("8766", result)
-
-    def test_per_connection_marker_is_unique(self):
-        self._write_token("tok")
-        h = self.pt.resolve_host("dbox")
-        r1 = self.pt.daemon_command(h, "ls", "s")
-        r2 = self.pt.daemon_command(h, "ls", "s")
-        # The random marker embedded in each call must differ.
-        import re
-
-        marks = re.findall(r"__SHUNT_END_[0-9a-f]+__", r1 + r2)
-        self.assertEqual(len(marks), 2)
-        self.assertNotEqual(marks[0], marks[1])
-
-    def test_shunt_tok_env_assignment_present(self):
-        self._write_token("mysecrettoken")
-        h = self.pt.resolve_host("dbox")
-        result = self.pt.daemon_command(h, "ls", "s")
-        self.assertIn("SHUNT_TOK=", result)
-
-    def test_fallback_to_shared_token(self):
-        # No per-alias token — fall back to the "token" file.
-        with open(os.path.join(self._tmpdir, "token"), "w") as f:
-            f.write("sharedtok")
-        h = self.pt.resolve_host("dbox")
-        result = self.pt.daemon_command(h, "ls", "s")
-        self.assertIn("sharedtok", result)
 
 
 if __name__ == "__main__":

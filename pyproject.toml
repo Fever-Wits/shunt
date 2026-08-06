@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shunt"
-version = "2026062407"
+version = "2026080610"
 description = "transparent remote hands for an AI coding agent — redirects bash to a chosen remote host via a Claude Code hook"
 requires-python = ">=3.11"
 dependencies = []
@@ -31,9 +31,6 @@ Repository = "https://github.com/Fever-Wits/shunt"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/shunt"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/shunt/systemd/shunt-daemon.service" = "shunt/systemd/shunt-daemon.service"
 
 [tool.ruff]
 line-length = 120

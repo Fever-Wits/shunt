@@ -1,18 +1,13 @@
 # ~/.config/shunt/hosts — one host per line:
 #
-#   <alias>  <transport>  <target>            [key=PATH]
+#   <alias>  ssh  <target>            [key=PATH]
 #
-# transport = ssh      → secure: target is user@host (recommended)
-# transport = daemon   → nonsecure: target is host:port (trusted LAN only)
+# target is user@host; `ssh` is the transport and the only one there is.
 #
 # Lines starting with # and blank lines are ignored.
 
-# secure (ssh) — no open port, no token:
 web-01   ssh     user@203.0.113.10    key=~/.ssh/id_ed25519
+web-02   ssh     user@203.0.113.20
 
-# nonsecure (daemon) — token-guarded TCP, trusted LAN only:
-# lan  daemon  203.0.113.50:8766
-
-# The daemon token (nonsecure transport) is stored separately in
-#   ~/.config/shunt/token   (chmod 600)
-# and is written automatically by:  shunt install user@host --mode nonsecure
+# `shunt install user@host [--alias NAME] [--key PATH]` writes a line here for you
+# (the same alias is replaced, never duplicated).

@@ -11,8 +11,8 @@ per-session working directory kept across commands. Alongside the hook ships a s
 
 What you can do: **edit remote files** with your normal local tools · **run commands transparently** on a remote host · **long tasks** in the background with `bg` + `--status` to monitor.
 
-Two transports: **ssh** (secure — no open ports, no shared token) and **daemon**
-(a token-guarded TCP listener, only for a trusted LAN).
+One transport: **ssh** + `ControlMaster` — no open ports, no shared token, nothing
+of shunt's installed on the server.
 
 ---
 
@@ -89,7 +89,7 @@ That `[shunt] LOCAL` confirms install completion. Switch to your host and your
 bash now runs there:
 
 ```
-@web-01          →  [shunt] mode: REMOTE → web-01 (user@203.0.113.10, ssh)
+@web-01          →  [shunt] mode: REMOTE → web-01 (user@203.0.113.10)
 hostname         →  web-01
 pwd              →  /home/user        (cwd is remembered per session)
 @local           →  [shunt] mode: LOCAL
@@ -106,7 +106,7 @@ Routing is **per session**, so parallel Claude sessions don't clash.
 
 | Command     | Effect |
 |-------------|--------|
-| `@<alias>`  | Route this session's bash to `<alias>` → `[shunt] mode: REMOTE → <alias> (<target>, <transport>)` |
+| `@<alias>`  | Route this session's bash to `<alias>` → `[shunt] mode: REMOTE → <alias> (<target>)` |
 | `@local`    | Stop redirecting; bash runs locally again → `[shunt] mode: LOCAL` |
 | `@status`   | Show current routing → `[shunt] REMOTE → <alias>` or `[shunt] LOCAL` |
 
@@ -124,7 +124,7 @@ Print the configured hosts.
 ```bash
 $ shunt hosts
 web-01   ssh     user@203.0.113.10    key=~/.ssh/id_ed25519
-lan      daemon  203.0.113.50:8766
+web-02   ssh     user@203.0.113.20
 ```
 
 ### `shunt read @host <file> [start:end]`
@@ -235,26 +235,17 @@ shunt commit                                  # pushes all pending checkouts bac
 - `shunt checkout --list` — show current checkouts (local path, remote `@host:/path`, base SHA).
 - `shunt checkout --abandon <local_path>` / `shunt commit --abandon <local_path>` — drop the manifest entry without pushing (local file stays on disk).
 
-### `shunt install <user>@<host> [--mode secure|nonsecure] [--alias A] [--key PATH] [--port P]`
+### `shunt install <user>@<host> [--alias A] [--key PATH]`
 
-Register a host and print the hook line.
+Register a host and print the hook line: checks `python3` on the server, writes an
+ssh hosts line, and tests the connection. Nothing is installed on the server.
 
 ```bash
-# secure (default) — ssh + ControlMaster; no open ports, no token
 shunt install user@203.0.113.10 --alias web-01 --key ~/.ssh/id_ed25519
-
-# nonsecure — uploads the daemon, generates a token, brings up a systemd unit
-shunt install user@203.0.113.50 --alias lan --mode nonsecure --port 8766
 ```
 
-- `--mode secure` (default) — writes an ssh hosts line and tests the connection.
-- `--mode nonsecure` — generates a token, `scp`s `daemon.py` to `/opt/shunt/`,
-  writes `/etc/shunt/daemon.env` (chmod 600), installs and starts the
-  `shunt-daemon` systemd unit, and stores the token locally (chmod 600). **Opens a
-  TCP port on the server** — see [Security](#security).
 - `--alias A` — host alias (defaults to the IP with dots → dashes).
-- `--key PATH` — ssh identity file (used for both ssh and scp).
-- `--port P` — daemon port for nonsecure mode (default `8766`).
+- `--key PATH` — ssh identity file.
 
 ---
 
@@ -262,48 +253,36 @@ shunt install user@203.0.113.50 --alias lan --mode nonsecure --port 8766
 
 ### `~/.config/shunt/hosts`
 
-One host per line: `<alias>  <transport>  <target>  [key=PATH]`. Lines starting
-with `#` and blank lines are ignored.
+One host per line: `<alias>  ssh  <target>  [key=PATH]`. The target is `user@host`;
+`ssh` is the transport and the only one there is. Lines starting with `#` and blank
+lines are ignored.
 
 ```
-# secure (ssh) — no open port, no token; target is user@host:
 web-01   ssh     user@203.0.113.10    key=~/.ssh/id_ed25519
-
-# nonsecure (daemon) — token-guarded TCP, trusted LAN only; target is host:port:
-lan      daemon  203.0.113.50:8766
+web-02   ssh     user@203.0.113.20
 ```
 
-See [`hosts.example`](hosts.example). For the daemon transport, the token lives in
-`~/.config/shunt/token` (and a per-alias `~/.config/shunt/token.<alias>` for
-multi-daemon setups), both chmod 600 — written automatically by `shunt install
---mode nonsecure`.
+See [`hosts.example`](hosts.example).
 
 ### Environment variables
 
 | Variable | Used by | Meaning |
 |----------|---------|---------|
 | `SHUNT_CONF` | CLI + hook | Config directory (default `~/.config/shunt`) |
-| `SHUNT_HOST` | daemon | Bind address of the daemon (daemon default `127.0.0.1`; `shunt install --mode nonsecure` sets it to `0.0.0.0`) |
-| `SHUNT_PORT` | daemon | Daemon listen port (default `8766`) |
-| `SHUNT_TOKEN` | daemon | Shared token the daemon requires (constant-time compared) |
 | `SHUNT_EDIT_MAX_BYTES` | edit helper | Max file size for `shunt edit` (default 64 MiB; larger → use `shunt cp` + local edit) |
 
 ---
 
 ## Security
 
-`shunt` gives an AI agent a shell on another machine. Understand the trust boundary
-before you use the nonsecure transport.
+`shunt` gives an AI agent a shell on another machine. That is the trust boundary:
+whoever drives the agent can run anything on every host you add, with the rights of
+the user in that host's target.
 
-- **secure (ssh)** — the default. Transport is plain ssh + ControlMaster:
-  **zero open ports, zero shared token**, fully encrypted. Use this for anything
-  reachable from an untrusted network.
-- **nonsecure (daemon)** — as installed, the daemon binds **`0.0.0.0:<port>`**,
-  i.e. an **open shell port on your LAN**: anyone on the network who has the token
-  gets a shell as the daemon's user. Only run this on a **trusted LAN**. The systemd
-  unit ships with a commented-out `User=`/`Group=` so you can drop it to a non-root
-  user; for anything beyond a trusted LAN, prefer an ssh tunnel / Tailscale and
-  `--mode secure`.
+The transport is plain ssh + ControlMaster: **zero open ports, zero shared token**,
+fully encrypted, nothing of shunt's installed on the server. ssh protects the
+channel; it does not protect the machine from its legitimate user — so use a
+dedicated key and the least-privileged account that can do the job.
 
 See [SECURITY.md](SECURITY.md) for the full threat model.
 
@@ -314,8 +293,8 @@ See [SECURITY.md](SECURITY.md) for the full threat model.
 The hook returns an `updatedInput` from `PreToolUse` so the rewritten command runs
 in Claude Code's normal sandbox — an official, documented mechanism. The ssh
 transport keeps cwd in a per-session remote state file and captures exit codes via a
-`trap EXIT`; the daemon transport is a self-contained inline TCP client with a
-random per-connection end marker.
+`trap EXIT`; `ControlMaster` reuses one multiplexed connection, so the handshake is
+paid once and later commands feel local-fast.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the details.
 

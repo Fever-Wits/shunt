@@ -7,8 +7,8 @@ once — it fits on a screen.
 
 **shunt has zero runtime dependencies and must keep it that way.** Everything
 runs on the Python standard library (`>=3.11`). This is not an accident: the
-hook-rewritten command runs in a strict sandbox, and the edit helper / daemon
-are deployed inline to remote hosts that may have nothing but `python3`. **Do
+hook-rewritten command runs in a strict sandbox, and the file helpers are
+deployed inline to remote hosts that may have nothing but `python3`. **Do
 not add a new dependency** — `[project].dependencies` in `pyproject.toml` stays
 empty. If you think you need one, open an issue first; the answer is almost
 always "use stdlib."
@@ -36,7 +36,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 ```
 feat: add @host alias autocompletion
 fix: preserve CRLF style on edit verify
-docs: clarify nonsecure threat model
+docs: clarify the transport threat model
 ```
 
 Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`.

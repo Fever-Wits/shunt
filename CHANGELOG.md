@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
+## [2026080610] — 2026-08-06
+
+**Breaking:** the `daemon` transport is gone. shunt now speaks ssh, and only ssh.
+
+### Removed
+
+- **The `daemon` transport** — `daemon.py`, its systemd unit, the inline TCP client
+  inside the hook, and the token it needed; along with `shunt install --mode
+  secure|nonsecure` and `--port`, and the `SHUNT_TOKEN` / `SHUNT_PORT` / `SHUNT_HOST`
+  environment variables.
+
+  **Why:** the daemon existed for speed — to avoid paying an ssh handshake on every
+  command. ssh here runs with `ControlMaster`, which amortizes that handshake to
+  milliseconds after the first call (measured: ~0.24–0.36 s per command without it,
+  ~0.01 s with it once the master connection is up). The problem the daemon was built
+  to solve is already solved by ssh — with no open port, no shared token, and nothing
+  installed on the server. On top of that, every file operation (`read`, `edit`,
+  `checkout`, `commit`, `cp`, `bg`, `get`) required ssh anyway; the daemon carried
+  only the redirected bare bash. So: not "nobody used it" — ssh caught up and passed
+  it.
+
+- **The daemon hardening guide in `SECURITY.md`** (restricting the port, ssh tunnel,
+  Tailscale, token rotation) — it protected a component that no longer exists. What in
+  it was true of ssh as well stayed: a least-privileged remote account, a dedicated key
+  you can revoke on suspicion, and the fact that the command text lands in the agent
+  transcript and the audit log.
+
+### Changed
+
+- `shunt install <user>@<host> [--alias A] [--key PATH]` — no `--mode`, no `--port`.
+- A host is still `<alias> ssh <target> [key=PATH]` in `~/.config/shunt/hosts`. The
+  `ssh` word remains required: a line naming any other transport is **not** treated as
+  a host, so an old `daemon` line fails loudly (`unknown host: <alias>`) instead of
+  silently becoming some other destination.
+- `@<alias>` now reports `REMOTE → <alias> (<target>)` — the transport dropped out of
+  the message, there being only one.
+
+### If you were running the daemon
+
+1. Re-register the host over ssh:
+   `shunt install user@<host> --alias <alias> [--key ~/.ssh/id_ed25519]`.
+2. Locally, delete `~/.config/shunt/token` and `~/.config/shunt/token.<alias>`.
+3. On the server: `systemctl disable --now shunt-daemon`, then remove
+   `/etc/systemd/system/shunt-daemon.service`, `/opt/shunt/` and `/etc/shunt/`.
+
+A session that was already routed to a daemon host when you upgraded resolves nothing
+and therefore runs **locally** again — the hook's standing behaviour for a target it
+cannot resolve. Re-issue `@<alias>` after re-registering the host, and `@status` will
+confirm where bash is going.
+
+**The old tags stay.** `v2026062322` and `v2026062407` still ship the daemon and are
+not going anywhere — if you need it, stay on the earlier release. The past is not
+erased; it just stops being carried forward.
+
+---
+
 ## [2026062407] — 2026-06-24
 
 ### Added

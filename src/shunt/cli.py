@@ -21,10 +21,10 @@ shunt CLI (this file) = the special operations:
   shunt commit  [<local_path>]             push edited local file(s) back to remote (conflict-safe)
   shunt commit  --abandon <local_path>     drop manifest entry without pushing
 
-hosts (~/.config/shunt/hosts): `<alias> <transport> <target> [key=...]`
-CLI operations go through ssh → require an ssh-reachable host.
+hosts (~/.config/shunt/hosts): `<alias> ssh <target> [key=...]`
+Everything travels over ssh — the only transport.
 """
-import sys, os, json, base64, shlex, subprocess, secrets, hashlib
+import sys, os, json, base64, shlex, subprocess, hashlib
 
 CONF = os.environ.get("SHUNT_CONF", os.path.expanduser("~/.config/shunt"))
 SELF_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -52,8 +52,10 @@ def resolve_host(alias):
         if not line or line.startswith("#"):
             continue
         p = line.split()
-        if len(p) >= 3 and p[0] == alias:
-            return {"alias": p[0], "transport": p[1], "target": p[2], "opts": p[3:]}
+        # ssh is the only transport: a line naming anything else holds something that is
+        # not an ssh destination, and must not silently become a host
+        if len(p) >= 3 and p[0] == alias and p[1] == "ssh":
+            return {"alias": p[0], "target": p[2], "opts": p[3:]}
     die("unknown host: %s" % alias)
 
 
@@ -65,8 +67,6 @@ def _key(host):
 
 
 def ssh_argv(host):
-    if host["transport"] != "ssh":
-        die("the operation requires an ssh-reachable host; '%s' is %s" % (host["alias"], host["transport"]))
     a = ["ssh"]
     k = _key(host)
     if k:
@@ -257,21 +257,16 @@ def _print_hook_hint():
 
 
 def cmd_install(argv):
-    """shunt install <user>@<host> [--alias A] [--key PATH] [--mode secure|nonsecure]
+    """shunt install <user>@<host> [--alias A] [--key PATH]
 
-    secure (default)  — ssh + ControlMaster: zero open ports, zero shared token.
-    nonsecure         — daemon (TCP + token) on the server: fast on a TRUSTED LAN.
+    ssh + ControlMaster: zero open ports, zero shared token.
     """
     if not argv or "@" not in argv[0]:
-        die("usage: shunt install <user>@<host> [--alias A] [--key PATH] [--mode secure|nonsecure]")
+        die("usage: shunt install <user>@<host> [--alias A] [--key PATH]")
     dest = argv[0]
     rest = argv[1:]
     alias = rest[rest.index("--alias") + 1] if "--alias" in rest else None
     key = os.path.expanduser(rest[rest.index("--key") + 1]) if "--key" in rest else None
-    mode = rest[rest.index("--mode") + 1] if "--mode" in rest else "secure"
-    if mode not in ("secure", "nonsecure"):
-        die("unknown --mode: %s (secure|nonsecure)" % mode)
-    port = int(rest[rest.index("--port") + 1]) if "--port" in rest else 8766
     host_ip = dest.split("@", 1)[1]
     if not alias:
         alias = host_ip.replace(".", "-")
@@ -279,16 +274,12 @@ def cmd_install(argv):
     if key:
         sb[1:1] = ["-i", key]
     sb.append(dest)
-    # 1) python3 on the server (needed for edit_helper / daemon)
+    # 1) python3 on the server (needed for edit_helper)
     r = subprocess.run(sb + ["python3 --version"], capture_output=True)
     if r.returncode != 0:
         die("python3 missing on %s: %s" % (host_ip, (r.stderr or b"").decode()[:200]))
     print("✓ python3 on %s: %s" % (host_ip, (r.stdout or r.stderr).decode().strip()))
 
-    if mode == "nonsecure":
-        return _install_nonsecure(dest, host_ip, alias, key, sb, port)
-
-    # ── secure (ssh) ──────────────────────────────────────────────────────────
     # 2) hosts line (idempotent — replaces a line with the same alias)
     line = "%s ssh %s%s" % (alias, dest, (" key=" + key) if key else "")
     _write_hosts_line(alias, line)
@@ -297,85 +288,6 @@ def cmd_install(argv):
     # 4) connection test
     print("\nTest:")
     subprocess.run(sb + ["echo '  ✓ connected to' $(hostname)"])
-    return 0
-
-
-def _install_nonsecure(dest, host_ip, alias, key, sb, port=8766):
-    """nonsecure (daemon) — generates a token, uploads daemon.py, brings up systemd, opens a port.
-
-    ⚠ The daemon listens on 0.0.0.0:<port> → gives a shell to ANYONE with the token on the network.
-    For production → ssh tunnel/Tailscale + non-root User= in the unit (DESIGN §6).
-    """
-    token = secrets.token_hex(16)
-    # pre-flight: is the port already taken on the server? (catches the silent crash-loop on a clash)
-    chk = subprocess.run(sb + ["ss -ltn 2>/dev/null | grep -q ':%d ' && echo BUSY || echo FREE" % port],
-                         capture_output=True)
-    if b"BUSY" in (chk.stdout or b""):
-        die("port %d is already taken on %s (another daemon?). Stop it or use a DIFFERENT --port." % (port, host_ip))
-    daemon_src = os.path.join(SELF_DIR, "daemon.py")
-    unit_src = os.path.join(SELF_DIR, "systemd", "shunt-daemon.service")
-    if not os.path.exists(daemon_src):
-        die("missing daemon.py: %s" % daemon_src)
-    if not os.path.exists(unit_src):
-        die("missing unit template: %s" % unit_src)
-    # scp uses the same key as ssh; -O forces the scp protocol (stable for simple paths)
-    scp = ["scp", "-O", "-o", "StrictHostKeyChecking=accept-new"]
-    if key:
-        scp[1:1] = ["-i", key]
-
-    # 1) /opt/shunt + daemon.py on the server
-    r = subprocess.run(sb + ["mkdir -p /opt/shunt /etc/shunt"])
-    if r.returncode != 0:
-        die("failed to create /opt/shunt and /etc/shunt on %s" % host_ip)
-    r = subprocess.run(scp + [daemon_src, dest + ":/opt/shunt/daemon.py"])
-    if r.returncode != 0:
-        die("scp of daemon.py failed")
-    print("✓ daemon.py → %s:/opt/shunt/daemon.py" % host_ip)
-
-    # 2) /etc/shunt/daemon.env (chmod 600) — SHUNT_HOST=0.0.0.0 (LAN access)
-    env_body = "SHUNT_TOKEN=%s\nSHUNT_PORT=%d\nSHUNT_HOST=0.0.0.0\n" % (token, port)
-    remote_env = ("umask 177 && cat > /etc/shunt/daemon.env <<'SHUNT_EOF'\n"
-                  + env_body + "SHUNT_EOF\nchmod 600 /etc/shunt/daemon.env")
-    r = subprocess.run(sb + [remote_env])
-    if r.returncode != 0:
-        die("failed to write /etc/shunt/daemon.env")
-    print("✓ /etc/shunt/daemon.env (chmod 600, SHUNT_HOST=0.0.0.0, port %d)" % port)
-
-    # 3) systemd unit → daemon-reload → enable --now
-    r = subprocess.run(scp + [unit_src, dest + ":/etc/systemd/system/shunt-daemon.service"])
-    if r.returncode != 0:
-        die("scp of the unit file failed")
-    r = subprocess.run(sb + ["systemctl daemon-reload && systemctl enable --now shunt-daemon"])
-    if r.returncode != 0:
-        die("systemctl enable --now shunt-daemon failed")
-    print("✓ systemd: shunt-daemon enabled + started")
-
-    # 4) local: hosts line (daemon transport, target = host:port) + token (chmod 600)
-    _write_hosts_line(alias, "%s daemon %s:%d" % (alias, host_ip, port))
-    os.makedirs(CONF, exist_ok=True)
-    tp = os.path.join(CONF, "token")
-    with open(tp, "w") as f:
-        f.write(token + "\n")
-    os.chmod(tp, 0o600)
-    print("✓ token → %s (chmod 600)" % tp)
-    # per-alias token (for multi-daemon setups); pretool falls back to shared token if absent
-    tap = os.path.join(CONF, "token." + alias)
-    with open(tap, "w") as f:
-        f.write(token + "\n")
-    os.chmod(tap, 0o600)
-    print("✓ token.%s → %s (chmod 600)" % (alias, tap))
-
-    # 5) hook instruction
-    _print_hook_hint()
-
-    # ⚠ threat-model warning
-    print("\n⚠ WARNING (nonsecure): the daemon listens on 0.0.0.0:%d → gives a shell to" % port)
-    print("  ANYONE with the token on the network. Only for a TRUSTED LAN.")
-    print("  For production → SSH tunnel/Tailscale + non-root User= in the unit; otherwise use --mode secure.")
-
-    # 6) connection test
-    print("\nTest:")
-    subprocess.run(sb + ["echo '  ✓ connected to' $(hostname); systemctl is-active shunt-daemon"])
     return 0
 
 
@@ -445,9 +357,7 @@ def cmd_checkout(argv):
     # default: pull remote file
     if len(argv) < 2:
         die("usage: shunt checkout @host <remote_path>")
-    host = resolve_host(argv[0])          # dies if not ssh
-    if host["transport"] != "ssh":
-        die("checkout requires an ssh-reachable host; '%s' is %s" % (host["alias"], host["transport"]))
+    host = resolve_host(argv[0])          # dies if the alias is unknown
     remote_path = argv[1]
 
     local = os.path.realpath(_checkout_local_path(host["alias"], remote_path))
@@ -519,11 +429,6 @@ def cmd_commit(argv):
         manifest_base_sha = info.get("base_sha")
 
         host = resolve_host(alias)
-        if host["transport"] != "ssh":
-            print("SKIP %s — host '%s' is not ssh" % (local, alias))
-            overall_rc = 1
-            continue
-
         sa = ssh_argv(host)
 
         # get remote current sha via sha256sum
