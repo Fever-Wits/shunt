@@ -26,6 +26,12 @@ shunt CLI (this file) = the special operations:
   shunt commit  [<local_path>]             push edited local file(s) back to remote (conflict-safe)
   shunt commit  --abandon <local_path>     drop manifest entry without pushing
 
+⚠ Every subcommand starts in the ssh LOGIN directory (usually $HOME). The per-session
+`cwd` the hook remembers for @host mode lives in a remote state file that only the hook
+reads and writes — the CLI does not share it. So give `run`/`read`/`edit` absolute paths,
+and read `get`'s default destination `.` as that login directory, not as wherever the
+session last `cd`-ed.
+
 hosts (~/.config/shunt/shunt.toml): see config.py — the legacy `hosts` file is still
 read when no shunt.toml exists. Everything goes through ssh, the only transport.
 """
@@ -132,9 +138,10 @@ MAP = """shunt — transparent remote hands. A bare bash command runs on the cho
   …list the machines                shunt hosts
 
   ⚠ The mode covers BASH ONLY.
-    Read/Write/Edit keep touching the LOCAL disk, and a spawned agent INHERITS the
-    mode and runs its bash on the far machine — reading absent local files as facts.
-    Remote file → `shunt read/edit`.  Agent that must work there → `shunt run`.
+    Read/Write/Edit and Grep/Glob keep touching the LOCAL disk, and a spawned agent
+    INHERITS the mode and runs its bash on the far machine — reading absent local
+    files as facts. Remote file → `shunt read/edit`.  Remote search → `shunt run`.
+    Agent that must work there → `shunt run`.
 
   Full docs: README.md (usage) · ARCHITECTURE.md (why it is built this way).
 """
@@ -367,7 +374,7 @@ def cmd_get(argv):
     return subprocess.run(ssh_argv(host) + [remote]).returncode
 
 
-HOOK_MATCHER = "Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit"
+HOOK_MATCHER = "Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob"
 
 
 def _print_hook_hint():

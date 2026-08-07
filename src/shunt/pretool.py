@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-shunt — pretool.py · PreToolUse hook (matcher: Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit)
+shunt — pretool.py · PreToolUse hook
+(matcher: Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob)
 
 Two jobs, one file — because both need the same answer to "where is this session routed?":
 
@@ -40,9 +41,16 @@ REWRITE_MARKER = "#shunt-rewritten\n"
 
 
 # Tools that do NOT follow @host mode. The hook rewrites Bash and nothing else, so
-# these keep reading the LOCAL disk while the session "feels" remote. Both failures are
-# silent — hence a warning instead of letting them be discovered from wrong output.
-FILE_TOOLS = ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit")
+# these keep working on the LOCAL disk while the session "feels" remote. Both failures
+# are silent — hence a warning instead of letting them be discovered from wrong output.
+# Grep/Glob are here for the AGENT, not for the human: a person searching a machine
+# types `grep`/`find` into bash, which the hook redirects correctly. An agent reaches
+# for the Grep tool instead, gets hits from the local disk, and reads them as facts
+# about the far one — and it reaches for it far more often than for Read.
+# ⚠ A name added here warns nobody on its own: the matcher in settings.json decides
+# which tools ever reach the hook. HOOK_MATCHER (cli.py, printed by `shunt install`)
+# is the other half of the same fact.
+LOCAL_DISK_TOOLS = ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Grep", "Glob")
 
 
 def emit(command):
@@ -308,6 +316,10 @@ def _warned_before(sid, alias):
 
     Keyed by host, not just session: switching @web-01 → @web-02 warns again, because the
     file tools are pointed somewhere new and the old warning no longer describes it.
+
+    ONE budget for every tool in LOCAL_DISK_TOOLS, not one per tool. Grep is called often
+    enough that a line per tool would become wallpaper — and wallpaper is silent exactly
+    when it needs to speak. That is why the warning names both remedies at once.
     """
     p = os.path.join(CONF, "warned." + sid)
     try:
@@ -338,10 +350,11 @@ def warn_if_off_mode(tool, sid):
              "its bash there, reading absent local files as facts. Switch with "
              "`@local` first, or make sure the agent is meant to work on %s."
              % (alias, alias))
-    if tool in FILE_TOOLS and not _warned_before(sid, alias):
-        warn("⚠ shunt: you are on @%s, but %s reads and writes the LOCAL disk — the "
-             "mode covers bash only. For a remote file use `shunt read/edit @%s …`. "
-             "(said once per host)" % (alias, tool, alias))
+    if tool in LOCAL_DISK_TOOLS and not _warned_before(sid, alias):
+        warn("⚠ shunt: you are on @%s, but %s works on the LOCAL disk — the mode covers "
+             "bash only. Remote file → `shunt read/edit @%s …`; remote search → "
+             "`shunt run @%s \"grep -rn PATTERN /path\"`. (said once per host)"
+             % (alias, tool, alias, alias))
 
 
 def resolve_host(alias):

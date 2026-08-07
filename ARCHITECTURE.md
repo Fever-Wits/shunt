@@ -58,8 +58,8 @@ single base64 argv. The remote side therefore needs nothing but `python3`.
 ## 3. `pretool.py` — the transparent-execution hook
 
 `pretool.py` is registered as a `PreToolUse` hook with the matcher
-`Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit`. **Only `Bash` is ever
-rewritten**; the wider matcher exists for the mode-boundary warnings below.
+`Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob`. **Only `Bash` is
+ever rewritten**; the wider matcher exists for the mode-boundary warnings below.
 
 On every matched tool call the agent host invokes the hook with the call as JSON
 on stdin. For a `Bash` call the hook applies these checks, in this order:
@@ -98,18 +98,36 @@ and is otherwise left exactly as it came.
 ### Where the mode stops
 
 The mode covers **bash and nothing else**: the hook rewrites `Bash` and no other
-tool. File tools keep touching the local disk while the session feels remote, and
-a spawned agent inherits the routing and runs its own bash on the far machine —
-reading absent local files as facts about the world. Both failures are silent,
-which is why the wider matcher exists: on every matched non-bash tool the hook
-answers with `additionalContext` instead of `updatedInput`.
+tool. File and search tools keep touching the local disk while the session feels
+remote, and a spawned agent inherits the routing and runs its own bash on the far
+machine — reading absent local files as facts about the world. Both failures are
+silent, which is why the wider matcher exists: on every matched non-bash tool the
+hook answers with `additionalContext` instead of `updatedInput`.
 
 - **`Agent`** — warned on **every** spawn; each one inherits the mode anew, so a
   once-per-session warning would miss all the later ones.
-- **`Read` / `Write` / `Edit` / `MultiEdit` / `NotebookEdit`** — warned **once per
-  host** (state in `<conf>/warned.<session_id>`, cleared by `@local`). Keyed by
-  host rather than by session: switching `@web-01 → @web-02` warns again, because
-  the old warning no longer describes where the tools are pointed.
+- **`Read` / `Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Grep` / `Glob`**
+  (`pretool.LOCAL_DISK_TOOLS`) — warned **once per host** (state in
+  `<conf>/warned.<session_id>`, cleared by `@local`). Keyed by host rather than by
+  session: switching `@web-01 → @web-02` warns again, because the old warning no
+  longer describes where the tools are pointed.
+
+The search tools carry an **agent's** failure rather than a human's: a person
+looking through a machine types `grep` or `find` into bash, which the hook
+redirects correctly. An agent reaches for the `Grep` tool instead — far more often
+than for `Read` — and reads local hits as facts about the far machine. The budget
+is shared by the whole list, not spent per tool, because a line on every `Grep`
+call would become wallpaper; that is why the one warning names both remedies at
+once (remote file → `shunt read/edit`, remote search → `shunt run`).
+
+⚠ **The list is half the fact.** `LOCAL_DISK_TOOLS` says which tools are warned
+about; the matcher in `settings.json` says which ever reach the hook at all. A name
+added to one and not the other warns nobody. `HOOK_MATCHER` (`cli.py`, printed by
+`shunt install`) is guarded against the tuple by
+`tests/test_hook_hint.py`; the prose copies of the matcher — this section, the
+`pretool.py` docstring, the README snippet, `AGENTS.md` — are guarded by the eye.
+Widening it also needs a line in a file shunt does not own, the user's
+`~/.claude/settings.json`: `shunt install` **prints** it, the owner installs it.
 
 It **never blocks** — remote mode plus a local file is legitimate as often as it
 is a mistake; only the silence was the defect. The whole branch is wrapped
@@ -231,6 +249,13 @@ survive.
 is per-session *and* per-destination). Switch `@web-01 → @web-02` inside one
 session and the second host inherits the last directory from the first; if that
 path does not exist there, the shell quietly starts in `$HOME`. A known boundary.
+
+⚠ **The CLI does not read that state at all** — `ssh_argv()` carries no `cd`, so
+every `shunt run` / `read` / `edit` / `get` starts in the ssh **login** directory
+(usually `$HOME`), not where the session last `cd`-ed. Give the CLI absolute paths,
+and read `get`'s default destination `.` as that login directory. Also a known
+boundary rather than a pending fix: a cwd for the CLI would mean a session where
+there is none — which is exactly why `shunt run` exists.
 
 ### The audit log is an archive; trimming it is a fuse
 
@@ -551,10 +576,12 @@ Collected in one place, because each is a boundary rather than a pending fix:
 - **An interrupted foreground command keeps running** on the far machine (§4).
 - **cwd is per session, not per host** — switching hosts inside one session
   inherits the previous host's directory (§5).
+- **The CLI does not share the session's cwd** — every subcommand starts in the
+  ssh login directory (§5).
 - **`shunt checkout` has no size cap**, while `edit` and `commit` do (§7).
 - **`shunt bg` needs the right to create system-level systemd units** on the
   remote host (§6).
 - **Audit trimming is lossy by design**, and a trim racing another session's
   append can drop a line (§5).
-- **The mode covers bash only** — file tools and spawned agents get a warning,
-  not a fence (§3).
+- **The mode covers bash only** — file tools, search tools and spawned agents get
+  a warning, not a fence (§3).

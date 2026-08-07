@@ -29,7 +29,7 @@ None of that limits what the agent may do once it is there. `ssh` protects the c
 ### Out of scope (explicitly **unsupported**)
 
 - **Sandboxing what the agent runs.** shunt faithfully relays commands; it does not filter, confine, or sanitize them. The remote shell runs with your ssh user's full privileges.
-- **Fencing the mode boundary.** The mode covers **`bash` only**. File tools (`Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`) keep touching the **local** disk while the session feels remote, and a spawned agent **inherits** the routing and runs its bash on the far machine. The hook **warns** about both instead of failing silently — but a warning is not a fence, and it never blocks. See "Where the mode stops" in the README.
+- **Fencing the mode boundary.** The mode covers **`bash` only**. File tools (`Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`) and search tools (`Grep`, `Glob`) keep touching the **local** disk while the session feels remote, and a spawned agent **inherits** the routing and runs its bash on the far machine. The hook **warns** about both instead of failing silently — but a warning is not a fence, and it never blocks. See "Where the mode stops" in the README.
 - **Protecting the command text once it is in the agent transcript.** The rewritten command — the full `ssh` invocation and the command itself — is recorded in the agent transcript and in the audit log. Do not type secrets into a redirected command. (There is no token in either; the transport has none.)
 - **Your ssh setup.** shunt uses the keys and accounts you give it; it does not manage them, and it does not harden the server's `sshd`.
 - **Multi-tenant isolation.** shunt assumes one operator and machines that operator trusts.

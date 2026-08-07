@@ -43,7 +43,7 @@ The CLI is only half of shunt. The transparent redirection comes from the
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit",
+        "matcher": "Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob",
         "hooks": [
           {
             "type": "command",
@@ -141,17 +141,35 @@ Two behaviours worth knowing before you rely on the transparency:
 ### Where the mode stops
 
 **The mode covers `bash` and nothing else.** File tools (`Read`, `Write`, `Edit`,
-`MultiEdit`, `NotebookEdit`) keep reading the **local** disk while the session feels
-remote, and a spawned agent **inherits** the mode and runs its own commands on the far
-machine — reading absent local files as facts about the world. Both failures are silent,
-so the hook says them out loud instead: it warns when an agent is spawned in remote mode,
-and once per host when a file tool runs there.
+`MultiEdit`, `NotebookEdit`) and search tools (`Grep`, `Glob`) keep working on the
+**local** disk while the session feels remote, and a spawned agent **inherits** the mode
+and runs its own commands on the far machine — reading absent local files as facts about
+the world. Both failures are silent, so the hook says them out loud instead: it warns
+when an agent is spawned in remote mode, and once per host when one of those tools runs
+there.
+
+The search tools are in that list for the **agent**: a person looking through a machine
+types `grep` or `find` into bash, and the hook sends it to the right place. An agent
+reaches for the `Grep` tool instead — far more often than for `Read` — and reads local
+hits as facts about the far machine.
 
 It **never blocks** — working remotely with a local file is legitimate as often as it is
 a mistake; only the silence was the defect. For a remote file use `shunt read` /
-`shunt edit` / `shunt checkout`; for an agent that genuinely must work on the far
-machine, give it `shunt run @host …` explicitly rather than leaving the session in
+`shunt edit` / `shunt checkout`; for a remote search,
+`shunt run @host "grep -rn PATTERN /path"`; for an agent that genuinely must work on the
+far machine, give it `shunt run @host …` explicitly rather than leaving the session in
 remote mode.
+
+One warning per host per session, shared by all of those tools: `Grep` is called often
+enough that a line per call would become wallpaper — and wallpaper is silent exactly when
+it should speak. That is why the one line names both remedies.
+
+### The CLI does not share the session's `cwd`
+
+The hook keeps a working directory per session for `@host` mode; the CLI never reads that
+state file, so every `shunt run` / `read` / `edit` / `get` starts in the **ssh login
+directory** (usually `$HOME`). Give absolute paths, and read `shunt get`'s default
+destination (`.`) as that login directory — not as wherever the session last `cd`-ed.
 
 ### `shunt hosts`
 
@@ -266,8 +284,9 @@ $ shunt bg @web-01 --stop shunt-nightly-build
 
 ### `shunt get @host <url> [dest_dir]`
 
-Download a URL **on the server itself** (`wget -b`, in the background). Defaults the
-destination to the remote cwd (`.`).
+Download a URL **on the server itself** (`wget -b`, in the background). The default
+destination (`.`) is the ssh **login** directory — the CLI does not share the session's
+remote `cwd` (see [above](#the-cli-does-not-share-the-sessions-cwd)).
 
 ```bash
 $ shunt get @web-01 https://example.com/big.iso /opt/downloads

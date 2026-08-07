@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
+## [2026080707] — 2026-08-07
+
+### Added
+
+- **`Grep` and `Glob` are warned about too.** They read the same **local** disk as `Read`
+  while the session feels remote, and until now they did it in silence. The gap is mostly
+  an **agent's**: a person searching a machine types `grep` or `find` into bash, which the
+  hook redirects correctly — an agent reaches for the `Grep` tool instead, far more often
+  than for `Read`, and reads local hits as facts about the far machine.
+
+  **This changes the hook registration.** The matcher is now
+  `Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob` — see the README. Keeping
+  the old one leaves the redirection working exactly as before and simply loses these two
+  warnings; `shunt install` now prints the wider line. The tuple behind it was renamed
+  `FILE_TOOLS` → `LOCAL_DISK_TOOLS`, because searching is not editing a file.
+
+  The warning is still **one per host per session**, now shared by all seven tools: a line
+  on every `Grep` call would become wallpaper, and wallpaper is silent exactly when it
+  should speak. So the single line names both ways out — remote file →
+  `shunt read/edit`, remote search → `shunt run @host "grep -rn PATTERN /path"`.
+
+### Fixed
+
+- **Documentation: the CLI does not share the session's remote `cwd`.** The `shunt get`
+  entry said its default destination `.` was "the remote cwd". It is not: the per-session
+  directory lives in a state file only the hook reads, so every `shunt run` / `read` /
+  `edit` / `get` starts in the ssh **login** directory (usually `$HOME`). Nothing changed
+  in the code — the promise did. Give the CLI absolute paths.
+
 ## [2026080623] — 2026-08-06
 
 Five of these were **silent**: they answered `ok`, or said nothing at all, while doing

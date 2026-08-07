@@ -5,7 +5,10 @@ Coverage:
   - Bash rewriting is UNCHANGED by the warning branch (regression guard)
   - @status / @local switches still work
   - Agent spawned in remote mode → warned, every time (each spawn inherits the mode)
-  - file tools in remote mode → warned once per host, then quiet
+  - file AND search tools in remote mode → warned once per host, then quiet
+  - the single warning carries both remedies (remote file · remote search), because
+    the budget is shared: Grep is called often enough to turn a per-call line into
+    wallpaper
   - switching host re-arms the file-tool warning
   - @local clears it, so entering remote mode again warns again
   - nothing is warned about while local
@@ -195,12 +198,44 @@ class TestFileToolWarning(unittest.TestCase):
             self.assertIn("LOCAL disk", ctx)
             self.assertIn("shunt read", ctx)
 
-    def test_all_file_tools_covered(self):
-        for tool in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit"):
+    def test_all_local_disk_tools_covered(self):
+        """Spelled out, not read from the tuple: a name dropped from it must fail here."""
+        for tool in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit",
+                     "Grep", "Glob"):
             with TmpConf() as c:
                 c.route_to("h1")
                 _, out = run_hook(c, tool, {"file_path": "/x"})
                 self.assertIsNotNone(context_of(out), "%s not warned" % tool)
+
+    def test_grep_warned_in_remote_mode(self):
+        """The agent's tool: it searches the local disk and reads the hits as remote."""
+        with TmpConf() as c:
+            c.route_to("h1")
+            _, out = run_hook(c, "Grep", {"pattern": "TODO", "path": "/etc"})
+            ctx = context_of(out)
+            self.assertIsNotNone(ctx)
+            self.assertIn("LOCAL disk", ctx)
+            self.assertIn("shunt run", ctx)          # the remedy for a remote search
+
+    def test_search_and_file_tools_share_one_warning_per_host(self):
+        """A line per Grep call would become wallpaper — and wallpaper is never read."""
+        with TmpConf() as c:
+            c.route_to("h1")
+            _, first = run_hook(c, "Grep", {"pattern": "a"})
+            self.assertIsNotNone(context_of(first))
+            _, second = run_hook(c, "Grep", {"pattern": "b"})
+            _, third = run_hook(c, "Read", {"file_path": "/a"})
+            self.assertIsNone(context_of(second))
+            self.assertIsNone(context_of(third))
+
+    def test_the_one_warning_carries_both_remedies(self):
+        """Whichever tool spends the budget, the other's way out must be in the line."""
+        with TmpConf() as c:
+            c.route_to("h1")
+            _, out = run_hook(c, "Read", {"file_path": "/a"})
+            ctx = context_of(out)
+            self.assertIn("shunt read/edit", ctx)
+            self.assertIn("shunt run", ctx)
 
     def test_second_read_is_quiet(self):
         """Once per host — a warning on every read would become wallpaper."""
