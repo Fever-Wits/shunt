@@ -258,9 +258,9 @@ class TestInheritedLog(unittest.TestCase):
     the record above it, and both cuts move whole records.
     """
 
-    RECENT = [f"{days_ago(1)}T12:00:00 sid=s host=h :: for f in *.log; do\n",
+    RECENT = (f"{days_ago(1)}T12:00:00 sid=s host=h :: for f in *.log; do\n",
               "    gzip \"$f\"\n",                    # a space at the front — used to fall
-              "done\n"]                               # a letter at the front — used to stay
+              "done\n")                               # a letter at the front — used to stay
 
     def test_a_kept_command_does_not_lose_its_body(self):
         with TmpConf(TestFuse.TINY) as c:

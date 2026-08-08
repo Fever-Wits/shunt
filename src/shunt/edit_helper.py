@@ -80,7 +80,7 @@ def main():
     except Exception as e:
         return out({"status": "error", "message": f"stat failed: {e}",
                     "resolved_path": path})
-    MAX = int(os.environ.get("SHUNT_EDIT_MAX_BYTES", 64 * 1024 * 1024))
+    MAX = int(os.environ.get("SHUNT_EDIT_MAX_BYTES", str(64 * 1024 * 1024)))
     if st0.st_size > MAX:
         return out({"status": "error",
                     "message": f"file too large ({st0.st_size} bytes > limit {MAX}); "

@@ -48,7 +48,7 @@ def main():
     base_sha = req.get("base_sha")      # null → skip check (new file)
 
     # --- size guard (before decoding, to catch inflated payloads early) ---
-    MAX = int(os.environ.get("SHUNT_EDIT_MAX_BYTES", 64 * 1024 * 1024))
+    MAX = int(os.environ.get("SHUNT_EDIT_MAX_BYTES", str(64 * 1024 * 1024)))
     # rough check: base64 is ~4/3 of binary; a 64-MB file ≈ 87 MB of b64
     if len(content_b64) > MAX * 2:
         return out({"status": "error",
