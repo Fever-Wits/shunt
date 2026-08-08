@@ -358,9 +358,9 @@ class TestCheckoutPull(unittest.TestCase):
 
         with TmpConf() as conf:
             self._make_hosts(conf)
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stdout", new_callable=io.StringIO):
-                    rc = shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stdout", new_callable=io.StringIO):
+                rc = shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
 
             self.assertEqual(rc, 0)
             m = shunt_mod._manifest_load()
@@ -391,9 +391,9 @@ class TestCheckoutPull(unittest.TestCase):
 
         with TmpConf() as conf:
             self._make_hosts(conf)
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
-                    shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+                shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
             output = mock_out.getvalue().strip()
             # printed path must be an absolute path within CONF/checkouts/
             self.assertTrue(os.path.isabs(output))
@@ -412,10 +412,10 @@ class TestCheckoutPull(unittest.TestCase):
 
         with TmpConf() as conf:
             self._make_hosts(conf)
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stderr", new_callable=io.StringIO):
-                    with self.assertRaises(SystemExit) as ctx:
-                        shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stderr", new_callable=io.StringIO), \
+                 self.assertRaises(SystemExit) as ctx:
+                shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
             self.assertNotEqual(ctx.exception.code, 0)
             # manifest must NOT have a new entry
             self.assertEqual(shunt_mod._manifest_load(), {})
@@ -453,10 +453,10 @@ class TestCheckoutPull(unittest.TestCase):
             shunt_mod._manifest_save({local: {"host": "myhost", "remote": "/remote/file.py",
                                               "base_sha": "sha_from_the_first_checkout"}})
 
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stderr", new_callable=io.StringIO):
-                    with self.assertRaises(SystemExit) as ctx:
-                        shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stderr", new_callable=io.StringIO), \
+                 self.assertRaises(SystemExit) as ctx:
+                shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
 
             self.assertNotEqual(ctx.exception.code, 0)
             with open(local, "rb") as f:
@@ -478,10 +478,10 @@ class TestCheckoutPull(unittest.TestCase):
 
         with TmpConf() as conf:
             self._make_hosts(conf)
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stderr", new_callable=io.StringIO):
-                    with self.assertRaises(SystemExit) as ctx:
-                        shunt_mod.cmd_checkout(["@myhost", "/../../../../etc/passwd"])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stderr", new_callable=io.StringIO), \
+                 self.assertRaises(SystemExit) as ctx:
+                shunt_mod.cmd_checkout(["@myhost", "/../../../../etc/passwd"])
             self.assertNotEqual(ctx.exception.code, 0)
             self.assertFalse(called["ssh"], "guard must fire before any ssh call")
             self.assertEqual(shunt_mod._manifest_load(), {})
@@ -508,9 +508,9 @@ class TestCheckoutPull(unittest.TestCase):
                 expected_local: {"host": "myhost", "remote": "/remote/file.py",
                                  "base_sha": "stale_sha"}
             })
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stdout", new_callable=io.StringIO):
-                    shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stdout", new_callable=io.StringIO):
+                shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
 
             m = shunt_mod._manifest_load()
             entry = m[expected_local]
@@ -607,9 +607,9 @@ class TestCommitPush(unittest.TestCase):
 
         with TmpConf() as conf:
             local, _ = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
-                    rc = shunt_mod.cmd_commit([])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+                rc = shunt_mod.cmd_commit([])
 
             self.assertEqual(rc, 0)
             m = shunt_mod._manifest_load()
@@ -642,9 +642,9 @@ class TestCommitPush(unittest.TestCase):
                 r.stderr = b""
                 return r
 
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
-                    rc = shunt_mod.cmd_commit([])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+                rc = shunt_mod.cmd_commit([])
             output = mock_out.getvalue()
 
         self.assertIn("SKIP", output)
@@ -674,9 +674,9 @@ class TestCommitPush(unittest.TestCase):
 
         with TmpConf() as conf:
             local, base_sha = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
-                    rc = shunt_mod.cmd_commit([])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+                rc = shunt_mod.cmd_commit([])
 
             self.assertNotEqual(rc, 0)
             output = mock_out.getvalue()
@@ -708,9 +708,9 @@ class TestCommitPush(unittest.TestCase):
 
         with TmpConf() as conf:
             local, _ = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stdout", new_callable=io.StringIO):
-                    rc = shunt_mod.cmd_commit([local])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stdout", new_callable=io.StringIO):
+                rc = shunt_mod.cmd_commit([local])
             self.assertEqual(rc, 0)
 
     def test_commit_file_not_in_manifest_dies(self):
@@ -765,9 +765,9 @@ class TestCommitPush(unittest.TestCase):
 
         with TmpConf() as conf:
             local, base_sha = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
-                    rc = shunt_mod.cmd_commit([])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+                rc = shunt_mod.cmd_commit([])
 
             self.assertNotEqual(rc, 0)
             self.assertIn("CONFLICT", mock_out.getvalue())
@@ -799,9 +799,9 @@ class TestCommitPush(unittest.TestCase):
 
         with TmpConf() as conf:
             _, _ = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
-                    rc = shunt_mod.cmd_commit([])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+                rc = shunt_mod.cmd_commit([])
 
             self.assertNotEqual(rc, 0)
             self.assertIn("ERROR", mock_out.getvalue())
@@ -819,9 +819,9 @@ class TestCommitPush(unittest.TestCase):
 
         with TmpConf() as conf:
             _, _ = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
-                    rc = shunt_mod.cmd_commit([])
+            with patch("subprocess.run", side_effect=fake_run), \
+                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+                rc = shunt_mod.cmd_commit([])
 
             self.assertNotEqual(rc, 0)
             self.assertIn("SKIP", mock_out.getvalue())

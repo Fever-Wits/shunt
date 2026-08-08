@@ -143,9 +143,9 @@ class TestEachSubcommandIsRecorded(unittest.TestCase):
                                  stdout=json.dumps({"status": "ok",
                                                     "new_sha": sha}).encode())
 
-            with patch.object(shunt_mod.subprocess, "run", side_effect=fake_run):
-                with patch.object(sys, "stdout", io.StringIO()):
-                    shunt_mod.cmd_commit([])
+            with patch.object(shunt_mod.subprocess, "run", side_effect=fake_run), \
+                 patch.object(sys, "stdout", io.StringIO()):
+                shunt_mod.cmd_commit([])
             self.assertIn("[commit] /remote/file.py", c.lines()[0])
 
 
