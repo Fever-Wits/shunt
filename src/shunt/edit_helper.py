@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 shunt — edit_helper.py · server-side editor by CONTENT (not by line number).
 

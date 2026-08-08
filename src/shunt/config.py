@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 shunt — config.py · the hosts, read (and written) in ONE place.
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 shunt — write_helper.py · server-side full-file writer with optimistic SHA lock.
 

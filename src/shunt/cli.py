@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 shunt — CLI for operations on remote machines that the hook does not cover.
 

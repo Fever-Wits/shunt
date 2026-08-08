@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 shunt — pretool.py · PreToolUse hook
 (matcher: Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob)
