@@ -17,12 +17,10 @@ Coverage:
 SHUNT_CONF is redirected to a temp dir for every test that touches the filesystem.
 subprocess.run is monkeypatched to avoid real ssh/scp calls.
 """
-import base64
 import hashlib
 import io
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -162,12 +160,12 @@ class TestManifestHelpers(unittest.TestCase):
     """_manifest_load / _manifest_save / _sha256_file / _checkout_local_path."""
 
     def test_load_missing_returns_empty_dict(self):
-        with TmpConf() as conf:
+        with TmpConf():
             result = shunt_mod._manifest_load()
         self.assertEqual(result, {})
 
     def test_save_and_load_round_trip(self):
-        with TmpConf() as conf:
+        with TmpConf():
             data = {"/some/local/path.py": {"host": "myhost", "remote": "/remote/path.py",
                                              "base_sha": "abc123"}}
             shunt_mod._manifest_save(data)
@@ -175,7 +173,7 @@ class TestManifestHelpers(unittest.TestCase):
         self.assertEqual(loaded, data)
 
     def test_save_creates_parent_dirs(self):
-        with TmpConf() as conf:
+        with TmpConf():
             # manifest dir does not exist yet
             self.assertFalse(os.path.exists(os.path.dirname(shunt_mod.MANIFEST)))
             shunt_mod._manifest_save({"k": "v"})
@@ -183,14 +181,14 @@ class TestManifestHelpers(unittest.TestCase):
 
     def test_save_is_atomic(self):
         """save writes via .tmp then os.replace — no partial file visible."""
-        with TmpConf() as conf:
+        with TmpConf():
             shunt_mod._manifest_save({"a": "1"})
             # tmp file must not exist after save
             tmp_path = shunt_mod.MANIFEST + ".tmp"
             self.assertFalse(os.path.exists(tmp_path))
 
     def test_corrupt_manifest_returns_empty(self):
-        with TmpConf() as conf:
+        with TmpConf():
             os.makedirs(os.path.dirname(shunt_mod.MANIFEST), exist_ok=True)
             with open(shunt_mod.MANIFEST, "w") as f:
                 f.write("{not valid json")
@@ -225,7 +223,7 @@ class TestManifestHelpers(unittest.TestCase):
 
     def test_checkout_local_path_different_aliases(self):
         """Different host aliases produce different local paths."""
-        with TmpConf() as conf:
+        with TmpConf():
             p1 = shunt_mod._checkout_local_path("host-a", "/etc/hosts")
             p2 = shunt_mod._checkout_local_path("host-b", "/etc/hosts")
         self.assertNotEqual(p1, p2)
@@ -368,7 +366,7 @@ class TestCheckoutPull(unittest.TestCase):
         with TmpConf() as conf:
             self._make_hosts(conf)
             with patch("subprocess.run", side_effect=fake_run):
-                with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+                with patch("sys.stdout", new_callable=io.StringIO):
                     rc = shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
 
             self.assertEqual(rc, 0)
