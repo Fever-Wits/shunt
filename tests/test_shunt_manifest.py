@@ -31,7 +31,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import shunt.cli as shunt_mod
 
-
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 def sha256(b: bytes) -> str:
@@ -111,36 +110,32 @@ class TestFnsDict(unittest.TestCase):
         missing subcommand (exit 2). Whatever it prints must name every subcommand.
         See tests/test_shunt_help.py.
         """
-        with patch.object(sys, "argv", ["shunt"]):
-            with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
-                with self.assertRaises(SystemExit) as ctx:
-                    shunt_mod.main()
-                out = mock_out.getvalue()
+        with patch.object(sys, "argv", ["shunt"]), patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            with self.assertRaises(SystemExit) as ctx:
+                shunt_mod.main()
+            out = mock_out.getvalue()
         self.assertEqual(ctx.exception.code, 2)   # no-args = missing subcommand = error
         self.assertIn("checkout", out)
         self.assertIn("commit", out)
 
     def test_unknown_subcommand_exits_nonzero(self):
         """Unknown subcommand causes SystemExit with non-zero code."""
-        with patch.object(sys, "argv", ["shunt", "no-such-cmd"]):
-            with self.assertRaises(SystemExit) as ctx:
-                shunt_mod.main()
+        with patch.object(sys, "argv", ["shunt", "no-such-cmd"]), self.assertRaises(SystemExit) as ctx:
+            shunt_mod.main()
         self.assertNotEqual(ctx.exception.code, 0)
 
     def test_checkout_subcommand_dispatched(self):
         """'checkout' dispatches to cmd_checkout (not 'unknown subcommand')."""
         with patch.object(shunt_mod, "cmd_checkout", return_value=0) as mock_co:
-            with patch.object(sys, "argv", ["shunt", "checkout", "--list"]):
-                with self.assertRaises(SystemExit):
-                    shunt_mod.main()
+            with patch.object(sys, "argv", ["shunt", "checkout", "--list"]), self.assertRaises(SystemExit):
+                shunt_mod.main()
             mock_co.assert_called_once()
 
     def test_commit_subcommand_dispatched(self):
         """'commit' dispatches to cmd_commit."""
         with patch.object(shunt_mod, "cmd_commit", return_value=0) as mock_cm:
-            with patch.object(sys, "argv", ["shunt", "commit"]):
-                with self.assertRaises(SystemExit):
-                    shunt_mod.main()
+            with patch.object(sys, "argv", ["shunt", "commit"]), self.assertRaises(SystemExit):
+                shunt_mod.main()
             mock_cm.assert_called_once()
 
     def test_preexisting_subcommands_not_removed(self):
@@ -148,9 +143,8 @@ class TestFnsDict(unittest.TestCase):
         for sub in ("hosts", "read", "edit", "cp", "bg", "get", "log", "install"):
             fn_name = "cmd_" + sub
             with patch.object(shunt_mod, fn_name, return_value=0) as mock_fn:
-                with patch.object(sys, "argv", ["shunt", sub]):
-                    with self.assertRaises(SystemExit):
-                        shunt_mod.main()
+                with patch.object(sys, "argv", ["shunt", sub]), self.assertRaises(SystemExit):
+                    shunt_mod.main()
                 mock_fn.assert_called_once()
 
 
@@ -332,9 +326,8 @@ class TestCheckoutAbandon(unittest.TestCase):
 
     def test_abandon_missing_arg_dies(self):
         """--abandon without a path calls die() → SystemExit."""
-        with TmpConf():
-            with self.assertRaises(SystemExit):
-                shunt_mod.cmd_checkout(["--abandon"])
+        with TmpConf(), self.assertRaises(SystemExit):
+            shunt_mod.cmd_checkout(["--abandon"])
 
 
 # ── cmd_checkout (main pull path, ssh stubbed) ─────────────────────────────────
@@ -565,9 +558,8 @@ class TestCommitAbandon(unittest.TestCase):
             self.assertEqual(rc, 1)
 
     def test_commit_abandon_missing_arg_dies(self):
-        with TmpConf():
-            with self.assertRaises(SystemExit):
-                shunt_mod.cmd_commit(["--abandon"])
+        with TmpConf(), self.assertRaises(SystemExit):
+            shunt_mod.cmd_commit(["--abandon"])
 
 
 # ── cmd_commit — push path (ssh stubbed) ──────────────────────────────────────

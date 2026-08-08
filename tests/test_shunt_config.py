@@ -174,9 +174,8 @@ class TestBrokenConfigIsLoud(unittest.TestCase):
         """The CLI turns it into one message instead of a traceback."""
         with TmpConf() as c:
             c.write("shunt.toml", "[hosts\nh1 = ")
-            with patch("sys.stderr", new_callable=io.StringIO) as err:
-                with self.assertRaises(SystemExit):
-                    shunt_mod.resolve_host("h1")
+            with patch("sys.stderr", new_callable=io.StringIO) as err, self.assertRaises(SystemExit):
+                shunt_mod.resolve_host("h1")
             self.assertIn("cannot read the host config", err.getvalue())
 
 
@@ -264,16 +263,14 @@ class TestNothingConfigured(unittest.TestCase):
 
     def test_cli_dies_on_a_missing_config(self):
         with TmpConf():
-            with patch("sys.stderr", new_callable=io.StringIO) as err:
-                with self.assertRaises(SystemExit):
-                    shunt_mod.resolve_host("@h1")
+            with patch("sys.stderr", new_callable=io.StringIO) as err, self.assertRaises(SystemExit):
+                shunt_mod.resolve_host("@h1")
             self.assertIn("unknown host", err.getvalue())
 
     def test_hosts_subcommand_dies_and_says_where(self):
         with TmpConf() as c:
-            with patch("sys.stderr", new_callable=io.StringIO) as err:
-                with self.assertRaises(SystemExit):
-                    shunt_mod.cmd_hosts([])
+            with patch("sys.stderr", new_callable=io.StringIO) as err, self.assertRaises(SystemExit):
+                shunt_mod.cmd_hosts([])
             self.assertIn(os.path.join(c.dir, "shunt.toml"), err.getvalue())
 
 

@@ -22,7 +22,12 @@ Output (JSON, status):
   conflict  → {status, current_sha, base_sha}         (optimistic SHA-256 lock)
   error     → {status, message}
 """
-import sys, json, os, hashlib, difflib, tempfile
+import difflib
+import hashlib
+import json
+import os
+import sys
+import tempfile
 
 
 def sha256(b: bytes) -> str:

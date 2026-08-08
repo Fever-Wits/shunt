@@ -28,7 +28,7 @@ import json
 import os
 import sys
 import tempfile
-import tomllib          # stdlib since Python 3.11
+import tomllib  # stdlib since Python 3.11
 
 TOML_NAME = "shunt.toml"
 LEGACY_NAME = "hosts"

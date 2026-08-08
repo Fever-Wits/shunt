@@ -26,6 +26,7 @@ class _PretoolBase(unittest.TestCase):
             f.write(self.HOSTS_CONTENT)
         # Force reimport so CONF is re-evaluated.
         import importlib
+
         import shunt.pretool as _pt
 
         importlib.reload(_pt)
@@ -179,6 +180,7 @@ class TestSshCommandShape(_PretoolBase):
         with open(os.path.join(self._tmpdir, "hosts"), "w") as f:
             f.write(hosts)
         import importlib
+
         import shunt.pretool as _pt
 
         importlib.reload(_pt)

@@ -19,7 +19,12 @@ Output JSON:
   conflict → {"status":"conflict", "current_sha":str, "base_sha":str}
   error    → {"status":"error", "message":str}
 """
-import sys, json, os, hashlib, tempfile, base64
+import base64
+import hashlib
+import json
+import os
+import sys
+import tempfile
 
 
 def sha256(b: bytes) -> str:

@@ -24,7 +24,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import shunt.cli as shunt_mod
 
-
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 class TmpHosts:
@@ -120,14 +119,12 @@ class TestExitCode(unittest.TestCase):
 class TestErrors(unittest.TestCase):
 
     def test_missing_command_is_usage_error(self):
-        with TmpHosts():
-            with self.assertRaises(SystemExit):
-                shunt_mod.cmd_run(["@h1"])
+        with TmpHosts(), self.assertRaises(SystemExit):
+            shunt_mod.cmd_run(["@h1"])
 
     def test_unknown_host_dies(self):
-        with TmpHosts():
-            with self.assertRaises(SystemExit):
-                shunt_mod.cmd_run(["@nope", "hostname"])
+        with TmpHosts(), self.assertRaises(SystemExit):
+            shunt_mod.cmd_run(["@nope", "hostname"])
 
     def test_legacy_line_of_an_unknown_shape_is_refused(self):
         """A legacy line that does not name ssh must not become a host.

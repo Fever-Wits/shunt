@@ -23,7 +23,12 @@ we stay independent of undocumented env settings.
 CRITICAL: the rewritten command runs in a strict sandbox (root, no ~/.config/shunt, BUT network
 OK). That is why the client is the `ssh` binary, which is available in the sandbox.
 """
-import json, sys, os, re, shlex, time     # `re` costs nothing extra — json loads it anyway
+import json  # `re` costs nothing extra — json loads it anyway
+import os
+import re
+import shlex
+import sys
+import time
 
 try:
     from shunt import config

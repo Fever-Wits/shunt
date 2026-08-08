@@ -35,10 +35,18 @@ session last `cd`-ed.
 hosts (~/.config/shunt/shunt.toml): see config.py — the legacy `hosts` file is still
 read when no shunt.toml exists. Everything goes through ssh, the only transport.
 """
-import sys, os, json, base64, shlex, subprocess, hashlib
+import base64
+import hashlib
+import json
+import os
+import shlex
+import subprocess
+import sys
 
-from shunt import config
-from shunt import pretool     # audit() — see audit_cli(); the log format — see cmd_log()
+from shunt import (
+    config,
+    pretool,  # audit() — see audit_cli(); the log format — see cmd_log()
+)
 
 CONF = os.environ.get("SHUNT_CONF", os.path.expanduser("~/.config/shunt"))
 SELF_DIR = os.path.dirname(os.path.realpath(__file__))

@@ -32,7 +32,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import shunt.cli as shunt_mod
-import shunt.pretool as pretool
+from shunt import pretool
 
 
 class TmpConf:

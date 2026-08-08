@@ -32,7 +32,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import shunt.config as shunt_config
-import shunt.pretool as pretool
+from shunt import pretool
 
 
 def days_ago(n):
@@ -64,9 +64,8 @@ class TmpConf:
         """specs = [(days_ago, marker, count), …] — oldest first."""
         with open(self.log, "w") as f:
             for age, marker, count in specs:
-                for i in range(count):
-                    f.write("%sT12:00:00 sid=s host=h :: %s-%d\n"
-                            % (days_ago(age), marker, i))
+                f.writelines("%sT12:00:00 sid=s host=h :: %s-%d\n"
+                            % (days_ago(age), marker, i) for i in range(count))
 
     def body(self):
         with open(self.log) as f:
@@ -282,8 +281,7 @@ class TestInheritedLog(unittest.TestCase):
                 for i in range(200):                  # all recent → only size can free
                     f.write("%sT12:00:00 sid=s host=h :: block-%03d line-0\n"
                             % (days_ago(1), i))
-                    for j in range(1, 4):
-                        f.write("    continuation-%d\n" % j)
+                    f.writelines("    continuation-%d\n" % j for j in range(1, 4))
             self.assertGreater(os.path.getsize(c.log), 20_000)
             pretool.audit("s", "h", "trigger")
             first = c.body().splitlines(True)[0]
