@@ -100,7 +100,7 @@ class TestFnsDict(unittest.TestCase):
                      "install", "checkout", "commit"):
             fn_name = "cmd_" + name
             self.assertIn(fn_name, dir(shunt_mod),
-                          "Missing subcommand function: %s" % fn_name)
+                          f"Missing subcommand function: {fn_name}")
 
     def test_main_lists_checkout_commit_in_map(self):
         """main() with no args prints the map, and the map includes checkout and commit.

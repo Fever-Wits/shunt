@@ -155,8 +155,8 @@ def audit(sid, alias, cmd, conf=None):
     path = os.path.join(conf, "audit.log")
     try:
         with open(path, "a") as f:
-            f.write("%s sid=%s host=%s :: %s\n"
-                    % (time.strftime("%Y-%m-%dT%H:%M:%S"), sid, alias, escape_cmd(cmd)))
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} sid={sid} host={alias} "
+                    f":: {escape_cmd(cmd)}\n")
         cfg = config.audit_settings(conf)
         ceiling = int(cfg["trim_at_mb"] * 1_000_000)
         if os.path.getsize(path) > ceiling:
@@ -351,15 +351,13 @@ def warn_if_off_mode(tool, sid):
         # Every spawn matters: the agent inherits the mode and reads missing local
         # files as facts about the world. Observed once as "the Bash tool briefly
         # lost access to the working directory" — it had not; it was elsewhere.
-        warn("⚠ shunt: you are on @%s — a spawned agent INHERITS this and will run "
+        warn(f"⚠ shunt: you are on @{alias} — a spawned agent INHERITS this and will run "
              "its bash there, reading absent local files as facts. Switch with "
-             "`@local` first, or make sure the agent is meant to work on %s."
-             % (alias, alias))
+             f"`@local` first, or make sure the agent is meant to work on {alias}.")
     if tool in LOCAL_DISK_TOOLS and not _warned_before(sid, alias):
-        warn("⚠ shunt: you are on @%s, but %s works on the LOCAL disk — the mode covers "
-             "bash only. Remote file → `shunt read/edit @%s …`; remote search → "
-             "`shunt run @%s \"grep -rn PATTERN /path\"`. (said once per host)"
-             % (alias, tool, alias, alias))
+        warn(f"⚠ shunt: you are on @{alias}, but {tool} works on the LOCAL disk — the mode covers "
+             f"bash only. Remote file → `shunt read/edit @{alias} …`; remote search → "
+             f"`shunt run @{alias} \"grep -rn PATTERN /path\"`. (said once per host)")
 
 
 def resolve_host(alias):
@@ -388,16 +386,16 @@ def ssh_command(host, cmd, sid):
     running there until it ends on its own — use `shunt bg` for long work.
     """
     key = host["key"]
-    sock = "/tmp/shunt-cm-%s-%%r@%%h:%%p.sock" % sid  # per-session AND PER-DESTINATION
+    sock = f"/tmp/shunt-cm-{sid}-%r@%h:%p.sock"  # per-session AND PER-DESTINATION
     # (%r/%h/%p filled in by ssh, same shape as the CLI's) — otherwise @web-01 then @web-02
     # in the same session share one socket and commands go to the wrong host. %r is the
     # USER: two aliases onto one machine with different accounts (the config allows it)
     # would otherwise ride the first one's master and run as the wrong account.
-    state = "/tmp/shunt-cwd-%s" % sid
+    state = f"/tmp/shunt-cwd-{sid}"
     # trap EXIT captures the code + updates cwd on EVERY exit (incl. `exit N` in the command)
-    trap_action = "rc=$?; pwd > %s 2>/dev/null; exit $rc" % shlex.quote(state)
+    trap_action = f"rc=$?; pwd > {shlex.quote(state)} 2>/dev/null; exit $rc"
     remote = (
-        'cd "$(cat %s 2>/dev/null || echo "$HOME")" 2>/dev/null || cd ~\n' % shlex.quote(state)
+        f'cd "$(cat {shlex.quote(state)} 2>/dev/null || echo "$HOME")" 2>/dev/null || cd ~\n'
         + "trap " + shlex.quote(trap_action) + " EXIT\n"
         + cmd
     )
@@ -476,7 +474,7 @@ def main():
                 f.write(alias)
         except Exception:
             sys.exit(0)
-        echo("[shunt] mode: REMOTE → %s (%s)" % (alias, host["target"]))
+        echo(f"[shunt] mode: REMOTE → {alias} ({host['target']})")
         sys.exit(0)
 
     # --- remote execution ---
@@ -490,9 +488,8 @@ def main():
             # REMOTE: `rm -rf /var/log/*` meant for a server deletes the local one.
             # Refusing is not the same as a traceback in front of every command — the
             # third option is the one @unknown already uses: say it, run nothing.
-            echo("[shunt] cannot resolve @%s — command NOT run (it would have run "
-                 "LOCALLY). Check `shunt hosts`, then `@%s` again or `@local`."
-                 % (alias, alias))
+            echo(f"[shunt] cannot resolve @{alias} — command NOT run (it would have run "
+                 f"LOCALLY). Check `shunt hosts`, then `@{alias}` again or `@local`.")
             sys.exit(0)                # echo() already exits; said out loud, as above
         # sidecar: record active routing target + append to audit log (fire-and-forget)
         try:

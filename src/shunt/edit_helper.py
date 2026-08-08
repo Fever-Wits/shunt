@@ -64,7 +64,7 @@ def main():
         else:                                        # local/interactive: JSON from stdin
             req = json.load(sys.stdin)
     except Exception as e:
-        return out({"status": "error", "message": "bad request: %s" % e})
+        return out({"status": "error", "message": f"bad request: {e}"})
 
     path = os.path.realpath(req.get("file", ""))   # resolve symlink → edit the target, not the link;
     # resolved_path is included in responses so the caller can see what was actually edited
@@ -79,19 +79,19 @@ def main():
     try:
         st0 = os.stat(path)
     except Exception as e:
-        return out({"status": "error", "message": "stat failed: %s" % e,
+        return out({"status": "error", "message": f"stat failed: {e}",
                     "resolved_path": path})
     MAX = int(os.environ.get("SHUNT_EDIT_MAX_BYTES", 64 * 1024 * 1024))
     if st0.st_size > MAX:
         return out({"status": "error",
-                    "message": "file too large (%d bytes > limit %d); use shunt cp + local edit"
-                               % (st0.st_size, MAX),
+                    "message": f"file too large ({st0.st_size} bytes > limit {MAX}); "
+                               "use shunt cp + local edit",
                     "resolved_path": path})
     try:
         with open(path, "rb") as f:
             raw = f.read()
     except Exception as e:
-        return out({"status": "error", "message": "read failed: %s" % e,
+        return out({"status": "error", "message": f"read failed: {e}",
                     "resolved_path": path})
 
     cur_sha = sha256(raw)
@@ -167,7 +167,7 @@ def main():
         if tmp:
             try: os.unlink(tmp)
             except Exception: pass
-        return out({"status": "error", "message": "write failed: %s" % e})
+        return out({"status": "error", "message": f"write failed: {e}"})
 
     # verify-after-write (our niche — no SSH MCP does this)
     with open(path, "rb") as f:

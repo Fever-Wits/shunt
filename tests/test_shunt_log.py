@@ -89,7 +89,7 @@ class TestNCountsRecords(unittest.TestCase):
     def test_n_counts_commands_not_lines(self):
         with TmpConf() as c:
             for i in range(5):
-                c.record("cmd-%d\nsecond line\nthird line" % i)
+                c.record(f"cmd-{i}\nsecond line\nthird line")
             out = shown(["-n", "2"])
             self.assertIn("cmd-3", out)
             self.assertIn("cmd-4", out)

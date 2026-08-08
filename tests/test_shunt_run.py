@@ -75,7 +75,7 @@ class TestRegistered(unittest.TestCase):
             src = f.read()
         for name in ("hosts", "run", "read", "edit", "cp", "bg", "get",
                      "log", "install", "checkout", "commit"):
-            self.assertIn('"%s": cmd_' % name, src)
+            self.assertIn(f'"{name}": cmd_', src)
 
 
 # ── quoting: the whole reason this is not a one-liner ──────────────────────────

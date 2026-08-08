@@ -52,8 +52,8 @@ class TestMapIsPrinted(unittest.TestCase):
     def test_help_forms_all_work(self):
         for form in ("help", "-h", "--help"):
             code, out, _ = run_cli(form)
-            self.assertEqual(code, 0, "%s did not exit 0" % form)
-            self.assertIn("I want to…", out, "%s printed no map" % form)
+            self.assertEqual(code, 0, f"{form} did not exit 0")
+            self.assertIn("I want to…", out, f"{form} printed no map")
 
     def test_map_goes_to_stdout_not_stderr(self):
         """Asking what a tool does is not an error condition."""
@@ -70,7 +70,7 @@ class TestMapMatchesCode(unittest.TestCase):
             src = f.read()
         registered = set(re.findall(r'"(\w+)": cmd_', src)) - {"help"}
         missing = sorted(c for c in registered if c not in shunt_mod.MAP)
-        self.assertEqual(missing, [], "subcommands missing from the map: %s" % missing)
+        self.assertEqual(missing, [], f"subcommands missing from the map: {missing}")
 
     def test_map_warns_about_the_boundary(self):
         """The mode covering bash only is the trap that cost real work — it must be said."""

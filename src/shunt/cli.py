@@ -67,7 +67,7 @@ def load_hosts():
     try:
         return config.load_hosts(CONF)
     except Exception as e:
-        die("cannot read the host config: %s" % e)
+        die(f"cannot read the host config: {e}")
 
 
 def resolve_host(alias):
@@ -75,7 +75,7 @@ def resolve_host(alias):
     alias = alias.lstrip("@")
     host = load_hosts().get(alias)
     if not host:
-        die("unknown host: %s" % alias)
+        die(f"unknown host: {alias}")
     return host
 
 
@@ -124,7 +124,7 @@ def audit_cli(subcommand, alias, detail):
     The line says WHAT it was: `sid=cli` (there is no session here) and the subcommand in
     front of the detail, so a CLI record cannot be read as bash that ran on the host.
     """
-    pretool.audit("cli", alias, "[%s] %s" % (subcommand, detail), conf=CONF)
+    pretool.audit("cli", alias, f"[{subcommand}] {detail}", conf=CONF)
 
 
 # ── subcommands ──────────────────────────────────────────────────────────────
@@ -165,12 +165,12 @@ def cmd_hosts(argv):
     """The configured hosts, resolved — not the raw file, which may be either format."""
     path = config.config_path(CONF)
     if not path:
-        die("no host config: %s" % os.path.join(CONF, config.TOML_NAME))
+        die(f"no host config: {os.path.join(CONF, config.TOML_NAME)}")
     hosts = load_hosts()
     print("# " + path)
     for alias, host in sorted(hosts.items()):
         key = ("  key=" + host["key"]) if host["key"] else ""
-        print("%-12s %s%s" % (alias, host["target"], key))
+        print(f"{alias:<12} {host['target']}{key}")
     if not hosts:
         print("(no hosts configured)")
     return 0
@@ -205,10 +205,10 @@ def cmd_read(argv):
     f = argv[1]
     if len(argv) > 2 and ":" in argv[2]:
         a, b = argv[2].split(":", 1)
-        remote = ("awk 'NR>=%d && NR<=%d{printf \"%%6d\\t%%s\\n\", NR, $0}' %s"
-                  % (int(a), int(b), shlex.quote(f)))
+        remote = (f"awk 'NR>={int(a)} && NR<={int(b)}{{printf \"%6d\\t%s\\n\", NR, $0}}' "
+                  f"{shlex.quote(f)}")
     else:
-        remote = "cat -n -- %s" % shlex.quote(f)
+        remote = f"cat -n -- {shlex.quote(f)}"
     return subprocess.run(ssh_argv(host) + [remote]).returncode
 
 
@@ -280,7 +280,7 @@ def cmd_cp(argv):
     h = host["ref"]
     if not h:
         die("at least one side must be @host:/path")
-    audit_cli("cp", h["alias"], "%s -> %s" % (argv[0], argv[1]))
+    audit_cli("cp", h["alias"], f"{argv[0]} -> {argv[1]}")
     # rsync takes its ssh command as ONE string — same options as every other hand
     e = "ssh " + " ".join(shlex.quote(o) for o in ssh_opts(h))
     return subprocess.run(["rsync", "-az", "--info=progress2", "-e", e, rsrc, rdst]).returncode
@@ -301,15 +301,15 @@ def cmd_bg(argv):
         if len(rest) < 2:
             die("usage: shunt bg @host --status JOB")
         job = shlex.quote(rest[1])
-        remote = ("journalctl -u %s --no-pager -n 60 2>/dev/null; echo '----'; "
-                  "systemctl show %s -p ExecMainStatus -p ExecMainCode -p Result -p SubState"
-                  % (job, job))
+        remote = (f"journalctl -u {job} --no-pager -n 60 2>/dev/null; echo '----'; "
+                  f"systemctl show {job} -p ExecMainStatus -p ExecMainCode -p Result -p SubState")
         return subprocess.run(sa + [remote]).returncode
     if rest[0] == "--stop":
         if len(rest) < 2:
             die("usage: shunt bg @host --stop JOB")
         job = shlex.quote(rest[1])
-        return subprocess.run(sa + ["systemctl stop %s; systemctl reset-failed %s 2>/dev/null; echo stopped" % (job, job)]).returncode
+        remote = f"systemctl stop {job}; systemctl reset-failed {job} 2>/dev/null; echo stopped"
+        return subprocess.run(sa + [remote]).returncode
     # start: system-level — survives disconnect, preserves exit code
     # optional --name LABEL for a human-readable unit name
     import re as _re
@@ -326,8 +326,8 @@ def cmd_bg(argv):
         unit = "shunt-" + label
     else:
         unit = "shunt-" + base64.b16encode(os.urandom(4)).decode().lower()
-    remote = ("systemd-run --collect --remain-after-exit --unit=%s bash -lc %s "
-              ">/dev/null && echo 'JOB=%s'" % (unit, shlex.quote(cmd), unit))
+    remote = (f"systemd-run --collect --remain-after-exit --unit={unit} bash -lc {shlex.quote(cmd)} "
+              f">/dev/null && echo 'JOB={unit}'")
     return subprocess.run(sa + [remote]).returncode
 
 
@@ -356,10 +356,10 @@ def cmd_log(argv):
         with open(log_path) as f:
             lines = f.readlines()
     except FileNotFoundError:
-        sys.stderr.write("shunt: no audit log yet (%s)\n" % log_path)
+        sys.stderr.write(f"shunt: no audit log yet ({log_path})\n")
         return 0
     except Exception as e:
-        sys.stderr.write("shunt: cannot read audit log: %s\n" % e)
+        sys.stderr.write(f"shunt: cannot read audit log: {e}\n")
         return 1
     records = pretool.log_records(lines)
     n = abs(n)                                  # negative -n → last |n| (not a bad slice)
@@ -374,11 +374,11 @@ def cmd_get(argv):
     host = resolve_host(argv[0])
     url = argv[1]
     dest = argv[2] if len(argv) > 2 else "."
-    audit_cli("get", host["alias"], "%s -> %s" % (url, dest))
-    log = "/tmp/shunt-wget-%s.log" % base64.b16encode(os.urandom(3)).decode().lower()
-    remote = ("cd %s && wget -b -o %s %s && echo 'downloading in background; progress: shunt read @%s %s or tail -f %s'"
-              % (shlex.quote(dest), shlex.quote(log), shlex.quote(url),
-                 host["alias"], shlex.quote(log), shlex.quote(log)))
+    audit_cli("get", host["alias"], f"{url} -> {dest}")
+    log = f"/tmp/shunt-wget-{base64.b16encode(os.urandom(3)).decode().lower()}.log"
+    remote = (f"cd {shlex.quote(dest)} && wget -b -o {shlex.quote(log)} {shlex.quote(url)} && "
+              f"echo 'downloading in background; progress: shunt read @{host['alias']} "
+              f"{shlex.quote(log)} or tail -f {shlex.quote(log)}'")
     return subprocess.run(ssh_argv(host) + [remote]).returncode
 
 
@@ -394,9 +394,9 @@ def _print_hook_hint():
     was found: the local setup only had them because a human had widened it by hand.
     """
     print("\nTo activate, add to ~/.claude/settings.json → hooks.PreToolUse (if not already there):")
-    print('  { "matcher": "%s",' % HOOK_MATCHER)
+    print(f'  {{ "matcher": "{HOOK_MATCHER}",')
     print('    "hooks": [ { "type": "command",')
-    print('      "command": "python3 %s/pretool.py" } ] }' % SELF_DIR)
+    print(f'      "command": "python3 {SELF_DIR}/pretool.py" }} ] }}')
     print("  (requires restarting the Claude Code session)")
 
 
@@ -422,15 +422,15 @@ def cmd_install(argv):
     # 1) python3 on the server (needed for edit_helper)
     r = subprocess.run(sb + ["python3 --version"], capture_output=True)
     if r.returncode != 0:
-        die("python3 missing on %s: %s" % (host_ip, (r.stderr or b"").decode()[:200]))
-    print("✓ python3 on %s: %s" % (host_ip, (r.stdout or r.stderr).decode().strip()))
+        die(f"python3 missing on {host_ip}: {(r.stderr or b'').decode()[:200]}")
+    print(f"✓ python3 on {host_ip}: {(r.stdout or r.stderr).decode().strip()}")
 
     # 2) the host entry (idempotent — an entry with the same alias is replaced)
     try:
         line = config.add_host(CONF, alias, dest, key)
     except Exception as e:
-        die("cannot write the host config: %s" % e)
-    print("✓ %s: %s" % (os.path.join(CONF, config.TOML_NAME), line))
+        die(f"cannot write the host config: {e}")
+    print(f"✓ {os.path.join(CONF, config.TOML_NAME)}: {line}")
     # 3) hook instruction (we do NOT touch someone else's settings.json automatically)
     _print_hook_hint()
     # 4) connection test
@@ -486,7 +486,7 @@ def cmd_checkout(argv):
             return 0
         for local, info in sorted(m.items()):
             sha_short = (info.get("base_sha") or "")[:12]
-            print("%-60s  @%s:%s  sha=%s" % (local, info["host"], info["remote"], sha_short))
+            print(f"{local:<60}  @{info['host']}:{info['remote']}  sha={sha_short}")
         return 0
 
     if argv[0] == "--abandon":
@@ -495,11 +495,11 @@ def cmd_checkout(argv):
         local = os.path.realpath(argv[1])
         m = _manifest_load()
         if local not in m:
-            print("shunt: not in manifest: %s" % local)
+            print(f"shunt: not in manifest: {local}")
             return 1
         del m[local]
         _manifest_save(m)
-        print("abandoned (manifest entry removed; local file left in place): %s" % local)
+        print(f"abandoned (manifest entry removed; local file left in place): {local}")
         return 0
 
     # default: pull remote file
@@ -513,7 +513,7 @@ def cmd_checkout(argv):
     # realpath also makes the manifest key match the realpath() used by abandon/commit.
     safe_root = os.path.realpath(os.path.join(CONF, "checkouts"))
     if local != safe_root and not local.startswith(safe_root + os.sep):
-        die("unsafe remote path (escapes checkout sandbox): %s" % remote_path)
+        die(f"unsafe remote path (escapes checkout sandbox): {remote_path}")
     os.makedirs(os.path.dirname(local), exist_ok=True)
 
     # pull via `cat` over ssh — raw-faithful (no scp binary quoting issues).
@@ -532,7 +532,7 @@ def cmd_checkout(argv):
         except Exception:
             pass
         sys.stderr.write((r.stderr or b"").decode("utf-8", "replace"))
-        die("checkout failed (exit %d) — the local file is untouched" % r.returncode,
+        die(f"checkout failed (exit {r.returncode}) — the local file is untouched",
             r.returncode)
     os.replace(part, local)
 
@@ -552,11 +552,11 @@ def cmd_commit(argv):
         local = os.path.realpath(argv[1])
         m = _manifest_load()
         if local not in m:
-            print("shunt: not in manifest: %s" % local)
+            print(f"shunt: not in manifest: {local}")
             return 1
         del m[local]
         _manifest_save(m)
-        print("abandoned (manifest entry removed; local file left in place): %s" % local)
+        print(f"abandoned (manifest entry removed; local file left in place): {local}")
         return 0
 
     m = _manifest_load()
@@ -568,7 +568,7 @@ def cmd_commit(argv):
     if argv:
         local = os.path.realpath(argv[0])
         if local not in m:
-            die("not in manifest: %s" % local)
+            die(f"not in manifest: {local}")
         targets = [local]
     else:
         targets = sorted(m.keys())
@@ -587,7 +587,7 @@ def cmd_commit(argv):
         # must not abandon the files after it
         host = load_hosts().get(alias)
         if not host:
-            print("SKIP %s — unknown host '%s' (not in the config)" % (local, alias))
+            print(f"SKIP {local} — unknown host '{alias}' (not in the config)")
             overall_rc = 1
             continue
         sa = ssh_argv(host)
@@ -596,17 +596,17 @@ def cmd_commit(argv):
         r = subprocess.run(sa + ["sha256sum -- " + shlex.quote(remote_path)],
                            capture_output=True)
         if r.returncode != 0:
-            print("SKIP %s — cannot sha256sum remote: %s"
-                  % (local, (r.stderr or b"").decode("utf-8", "replace").strip()))
+            print(f"SKIP {local} — cannot sha256sum remote: "
+                  f"{(r.stderr or b'').decode('utf-8', 'replace').strip()}")
             overall_rc = 1
             continue
         remote_sha_line = (r.stdout or b"").decode("utf-8", "replace").strip()
         remote_sha = remote_sha_line.split()[0] if remote_sha_line else None
 
         if remote_sha != manifest_base_sha:
-            print("CONFLICT %s — remote has changed since checkout" % local)
-            print("  manifest base_sha : %s" % (manifest_base_sha or "(none)"))
-            print("  remote current_sha: %s" % (remote_sha or "(unknown)"))
+            print(f"CONFLICT {local} — remote has changed since checkout")
+            print(f"  manifest base_sha : {manifest_base_sha or '(none)'}")
+            print(f"  remote current_sha: {remote_sha or '(unknown)'}")
             print("  re-checkout to pick up remote changes, then re-apply your edits.")
             overall_rc = 1
             continue
@@ -616,7 +616,7 @@ def cmd_commit(argv):
             with open(local, "rb") as f:
                 local_bytes = f.read()
         except Exception as e:
-            print("SKIP %s — cannot read local file: %s" % (local, e))
+            print(f"SKIP {local} — cannot read local file: {e}")
             overall_rc = 1
             continue
 
@@ -637,7 +637,7 @@ def cmd_commit(argv):
         try:
             result = json.loads(raw_out)
         except Exception:
-            print("ERROR %s — unexpected response: %s" % (local, raw_out[:200]))
+            print(f"ERROR {local} — unexpected response: {raw_out[:200]}")
             overall_rc = 1
             continue
 
@@ -648,13 +648,13 @@ def cmd_commit(argv):
             _manifest_save(m)
             old_short = (manifest_base_sha or "")[:12]
             new_short = new_sha[:12]
-            print("ok  %s  (%s → %s)" % (local, old_short, new_short))
+            print(f"ok  {local}  ({old_short} → {new_short})")
         elif status == "conflict":
-            print("CONFLICT %s — write_helper detected conflict (remote changed mid-flight)" % local)
-            print("  current_sha: %s" % result.get("current_sha"))
+            print(f"CONFLICT {local} — write_helper detected conflict (remote changed mid-flight)")
+            print(f"  current_sha: {result.get('current_sha')}")
             overall_rc = 1
         else:
-            print("ERROR %s — %s" % (local, result.get("message", raw_out[:200])))
+            print(f"ERROR {local} — {result.get('message', raw_out[:200])}")
             overall_rc = 1
 
     return overall_rc
@@ -677,7 +677,7 @@ def main():
            "help": cmd_help}
     fn = fns.get(sub)
     if not fn:
-        die("unknown subcommand: %s (run `shunt` for the map)" % sub)
+        die(f"unknown subcommand: {sub} (run `shunt` for the map)")
     sys.exit(fn(argv) or 0)
 
 

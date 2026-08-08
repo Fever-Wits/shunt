@@ -64,8 +64,8 @@ class TmpConf:
         """specs = [(days_ago, marker, count), …] — oldest first."""
         with open(self.log, "w") as f:
             for age, marker, count in specs:
-                f.writelines("%sT12:00:00 sid=s host=h :: %s-%d\n"
-                            % (days_ago(age), marker, i) for i in range(count))
+                f.writelines(f"{days_ago(age)}T12:00:00 sid=s host=h :: {marker}-{i}\n"
+                            for i in range(count))
 
     def body(self):
         with open(self.log) as f:
@@ -234,7 +234,7 @@ class TestDamagedFirstLine(unittest.TestCase):
         with TmpConf() as c:
             with open(c.log, "w") as f:
                 f.write("torn line with no date\n")
-                f.write("%sT12:00:00 sid=s host=h :: ls\n" % days_ago(1))
+                f.write(f"{days_ago(1)}T12:00:00 sid=s host=h :: ls\n")
             pretool._trim_audit(c.log, 2, 10)              # must not raise
 
     def test_cut_date_says_none_instead_of_raising(self):
@@ -258,7 +258,7 @@ class TestInheritedLog(unittest.TestCase):
     the record above it, and both cuts move whole records.
     """
 
-    RECENT = ["%sT12:00:00 sid=s host=h :: for f in *.log; do\n" % days_ago(1),
+    RECENT = [f"{days_ago(1)}T12:00:00 sid=s host=h :: for f in *.log; do\n",
               "    gzip \"$f\"\n",                    # a space at the front — used to fall
               "done\n"]                               # a letter at the front — used to stay
 
@@ -279,9 +279,8 @@ class TestInheritedLog(unittest.TestCase):
         with TmpConf(TestFuse.TINY) as c:
             with open(c.log, "w") as f:
                 for i in range(200):                  # all recent → only size can free
-                    f.write("%sT12:00:00 sid=s host=h :: block-%03d line-0\n"
-                            % (days_ago(1), i))
-                    f.writelines("    continuation-%d\n" % j for j in range(1, 4))
+                    f.write(f"{days_ago(1)}T12:00:00 sid=s host=h :: block-{i:03d} line-0\n")
+                    f.writelines(f"    continuation-{j}\n" for j in range(1, 4))
             self.assertGreater(os.path.getsize(c.log), 20_000)
             pretool.audit("s", "h", "trigger")
             first = c.body().splitlines(True)[0]
@@ -365,8 +364,8 @@ class TestRewriteIsClean(unittest.TestCase):
             c.write_lines([(400, "old", 400), (1, "new", 400)])
             pretool.audit("s", "h", "trigger")
             for line in c.body().splitlines():
-                self.assertIn(" :: ", line, "mangled line: %r" % line[:60])
-                self.assertTrue(line[:2] == "20", "line lost its date: %r" % line[:40])
+                self.assertIn(" :: ", line, f"mangled line: {line[:60]!r}")
+                self.assertTrue(line[:2] == "20", f"line lost its date: {line[:40]!r}")
 
 
 if __name__ == "__main__":

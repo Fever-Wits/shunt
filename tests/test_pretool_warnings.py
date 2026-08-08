@@ -205,7 +205,7 @@ class TestFileToolWarning(unittest.TestCase):
             with TmpConf() as c:
                 c.route_to("h1")
                 _, out = run_hook(c, tool, {"file_path": "/x"})
-                self.assertIsNotNone(context_of(out), "%s not warned" % tool)
+                self.assertIsNotNone(context_of(out), f"{tool} not warned")
 
     def test_grep_warned_in_remote_mode(self):
         """The agent's tool: it searches the local disk and reads the hits as remote."""
@@ -297,7 +297,7 @@ class TestBoundaries(unittest.TestCase):
             c.route_to("h1")
             for tool in ("Agent", "Read", "Write"):
                 code, _ = run_hook(c, tool, {})
-                self.assertEqual(code, 0, "%s did not exit 0" % tool)
+                self.assertEqual(code, 0, f"{tool} did not exit 0")
 
     def test_garbage_stdin_does_not_crash(self):
         r = subprocess.run([sys.executable, PRETOOL], input=b"not json",

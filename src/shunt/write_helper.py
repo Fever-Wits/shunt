@@ -42,7 +42,7 @@ def main():
         else:                           # local / interactive: JSON from stdin
             req = json.load(sys.stdin)
     except Exception as e:
-        return out({"status": "error", "message": "bad request: %s" % e})
+        return out({"status": "error", "message": f"bad request: {e}"})
 
     path = os.path.realpath(req.get("file", ""))
     content_b64 = req.get("content_b64", "")
@@ -53,18 +53,18 @@ def main():
     # rough check: base64 is ~4/3 of binary; a 64-MB file ≈ 87 MB of b64
     if len(content_b64) > MAX * 2:
         return out({"status": "error",
-                    "message": "payload too large (%d b64 chars); limit %d bytes raw"
-                               % (len(content_b64), MAX)})
+                    "message": f"payload too large ({len(content_b64)} b64 chars); "
+                               f"limit {MAX} bytes raw"})
 
     try:
         new_bytes = base64.b64decode(content_b64)
     except Exception as e:
-        return out({"status": "error", "message": "base64 decode failed: %s" % e})
+        return out({"status": "error", "message": f"base64 decode failed: {e}"})
 
     if len(new_bytes) > MAX:
         return out({"status": "error",
-                    "message": "content too large (%d bytes > limit %d); use shunt cp + local edit"
-                               % (len(new_bytes), MAX)})
+                    "message": f"content too large ({len(new_bytes)} bytes > limit {MAX}); "
+                               "use shunt cp + local edit"})
 
     # --- read current state ---
     file_existed = os.path.exists(path)
@@ -73,7 +73,7 @@ def main():
             with open(path, "rb") as f:
                 cur_bytes = f.read()
         except Exception as e:
-            return out({"status": "error", "message": "read failed: %s" % e})
+            return out({"status": "error", "message": f"read failed: {e}"})
         cur_sha = sha256(cur_bytes)
     else:
         cur_sha = None
@@ -88,7 +88,7 @@ def main():
     try:
         os.makedirs(d, exist_ok=True)
     except Exception as e:
-        return out({"status": "error", "message": "mkdir failed: %s" % e})
+        return out({"status": "error", "message": f"mkdir failed: {e}"})
 
     tmp = None
     try:
@@ -118,14 +118,14 @@ def main():
                 os.unlink(tmp)
             except Exception:
                 pass
-        return out({"status": "error", "message": "write failed: %s" % e})
+        return out({"status": "error", "message": f"write failed: {e}"})
 
     # --- verify-after-write ---
     try:
         with open(path, "rb") as f:
             vsha = sha256(f.read())
     except Exception as e:
-        return out({"status": "error", "message": "verify-read failed: %s" % e})
+        return out({"status": "error", "message": f"verify-read failed: {e}"})
 
     expected_sha = sha256(new_bytes)
     if vsha != expected_sha:

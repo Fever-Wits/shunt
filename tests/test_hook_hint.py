@@ -40,7 +40,7 @@ class TestHookHintMatchesReality(unittest.TestCase):
     def test_hint_names_every_tool_the_hook_warns_about(self):
         hint = self._hint()
         for tool in ("Bash", "Agent") + pretool.LOCAL_DISK_TOOLS:
-            self.assertIn(tool, hint, "install would not register %s" % tool)
+            self.assertIn(tool, hint, f"install would not register {tool}")
 
     def test_hint_is_valid_json_fragment(self):
         """It is copy-pasted into settings.json — a broken quote breaks every hook there."""

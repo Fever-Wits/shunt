@@ -76,7 +76,7 @@ class TestSingleSource(unittest.TestCase):
             e = rsync_ssh_string(["@keyed:/remote/f", "/local/f"])
             host = shunt_mod.resolve_host("keyed")
             for opt in shunt_mod.ssh_opts(host):
-                self.assertIn(opt, e, "cp is missing %r" % opt)
+                self.assertIn(opt, e, f"cp is missing {opt!r}")
 
 
 # ── the two options cp used to lack ────────────────────────────────────────────
@@ -159,8 +159,8 @@ class TestHookControlPath(unittest.TestCase):
         """One fact, two homes: whatever one keys on, the other must key on as well."""
         hook = self._controlpath("root@10.0.0.1")
         for token in ("%r", "%h", "%p"):
-            self.assertIn(token, shunt_mod.SOCK, "the CLI dropped %s" % token)
-            self.assertIn(token, hook, "the hook dropped %s" % token)
+            self.assertIn(token, shunt_mod.SOCK, f"the CLI dropped {token}")
+            self.assertIn(token, hook, f"the hook dropped {token}")
 
 
 if __name__ == "__main__":

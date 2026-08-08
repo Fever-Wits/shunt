@@ -150,8 +150,8 @@ def _load_toml(path):
             target, key = None, None
         if not target:
             raise ValueError(
-                '%s: host "%s" must be "user@host" or '
-                '{ target = "user@host", key = "~/.ssh/id" }' % (path, alias))
+                f'{path}: host "{alias}" must be "user@host" or '
+                '{ target = "user@host", key = "~/.ssh/id" }')
         hosts[alias] = _host(alias, target, key)
     return hosts
 
@@ -189,15 +189,15 @@ def _say_legacy_once(conf_dir, legacy_path, dropped=0):
     if _legacy_notice_said:
         return
     _legacy_notice_said = True
+    new_path = os.path.join(conf_dir, TOML_NAME)
     sys.stderr.write(
-        "shunt: reading the legacy host list %s\n"
-        "       the new place is %s (see shunt.toml.example) — nothing is migrated\n"
-        "       automatically; the legacy file keeps working until you move it\n"
-        % (legacy_path, os.path.join(conf_dir, TOML_NAME)))
+        f"shunt: reading the legacy host list {legacy_path}\n"
+        f"       the new place is {new_path} (see shunt.toml.example) — nothing is migrated\n"
+        "       automatically; the legacy file keeps working until you move it\n")
     if dropped:
         sys.stderr.write(
-            "       %d line(s) skipped: not in the `<alias> ssh <target>` form —\n"
-            "       shunt speaks ssh only\n" % dropped)
+            f"       {dropped} line(s) skipped: not in the `<alias> ssh <target>` form —\n"
+            "       shunt speaks ssh only\n")
 
 
 # ── writing ───────────────────────────────────────────────────────────────────
@@ -250,15 +250,14 @@ def _toml_key(alias):
 
 def _entry_line(alias, target, key):
     if key:
-        return "%s = { target = %s, key = %s }" % (
-            _toml_key(alias), _toml_str(target), _toml_str(key))
-    return "%s = %s" % (_toml_key(alias), _toml_str(target))
+        return f"{_toml_key(alias)} = {{ target = {_toml_str(target)}, key = {_toml_str(key)} }}"
+    return f"{_toml_key(alias)} = {_toml_str(target)}"
 
 
 def _fresh_document(entry_line, key):
     head = "# shunt hosts — see shunt.toml.example for the full form\n"
     if key:
-        head += "key = %s      # default identity for every host below\n" % _toml_str(key)
+        head += f"key = {_toml_str(key)}      # default identity for every host below\n"
     return head + "\n[hosts]\n" + entry_line + "\n"
 
 
