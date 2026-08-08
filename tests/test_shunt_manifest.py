@@ -606,7 +606,7 @@ class TestCommitPush(unittest.TestCase):
             return m
 
         with TmpConf() as conf:
-            local, base_sha = self._setup_conf(conf, local_content)
+            local, _ = self._setup_conf(conf, local_content)
             with patch("subprocess.run", side_effect=fake_run):
                 with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
                     rc = shunt_mod.cmd_commit([])
@@ -620,7 +620,7 @@ class TestCommitPush(unittest.TestCase):
         """A manifest entry can outlive its host. One stale entry must not abandon the
         files after it — commit reports it, sets a non-zero code, and carries on."""
         with TmpConf() as conf:
-            local, base_sha = self._setup_conf(conf, b"content\n")
+            _, base_sha = self._setup_conf(conf, b"content\n")
 
             # a second entry whose host is no longer configured, ordered FIRST
             stale = os.path.join(conf, "checkouts", "goneaway", "remote", "old.py")
@@ -798,7 +798,7 @@ class TestCommitPush(unittest.TestCase):
             return m
 
         with TmpConf() as conf:
-            local, _ = self._setup_conf(conf, local_content)
+            _, _ = self._setup_conf(conf, local_content)
             with patch("subprocess.run", side_effect=fake_run):
                 with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
                     rc = shunt_mod.cmd_commit([])
@@ -818,7 +818,7 @@ class TestCommitPush(unittest.TestCase):
             return m
 
         with TmpConf() as conf:
-            local, _ = self._setup_conf(conf, local_content)
+            _, _ = self._setup_conf(conf, local_content)
             with patch("subprocess.run", side_effect=fake_run):
                 with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
                     rc = shunt_mod.cmd_commit([])

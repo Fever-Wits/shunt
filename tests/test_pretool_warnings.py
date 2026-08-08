@@ -141,19 +141,19 @@ class TestBashUnchanged(unittest.TestCase):
     def test_already_rewritten_command_is_left_alone(self):
         with TmpConf() as c:
             c.route_to("h1")
-            code, out = run_hook(c, "Bash", {"command": "#shunt-rewritten\nls"})
+            _, out = run_hook(c, "Bash", {"command": "#shunt-rewritten\nls"})
             self.assertEqual(out.strip(), "")
 
     def test_shunt_cli_stays_local(self):
         with TmpConf() as c:
             c.route_to("h1")
-            code, out = run_hook(c, "Bash", {"command": "shunt hosts"})
+            _, out = run_hook(c, "Bash", {"command": "shunt hosts"})
             self.assertEqual(out.strip(), "")
 
     def test_status_switch_still_answers(self):
         with TmpConf() as c:
             c.route_to("h1")
-            code, out = run_hook(c, "Bash", {"command": "@status"})
+            _, out = run_hook(c, "Bash", {"command": "@status"})
             self.assertIn("REMOTE", rewritten_command(out))
 
 
@@ -173,7 +173,7 @@ class TestAgentWarning(unittest.TestCase):
 
     def test_agent_silent_when_local(self):
         with TmpConf() as c:
-            code, out = run_hook(c, "Agent", {"prompt": "go"})
+            _, out = run_hook(c, "Agent", {"prompt": "go"})
             self.assertIsNone(context_of(out))
 
     def test_agent_warned_every_time(self):
