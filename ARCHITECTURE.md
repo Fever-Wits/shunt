@@ -213,8 +213,8 @@ global "current host".
 - **`@<alias>`** writes that alias to the session's state file and confirms
   `REMOTE → <alias> (<target>)`. An unknown alias is reported and changes
   nothing.
-- **`@local`** removes the state file (and the active-host sidecar, and the
-  warning marker) → commands run locally again.
+- **`@local`** removes the state file (and the active-host sidecar, the warning
+  marker and the armed switch marker) → commands run locally again.
 - **`@status`** reports the current mode for this session.
 
 On each routed command the hook also:
@@ -238,17 +238,47 @@ with the file.
 ### Working-directory persistence
 
 A naive redirect would lose `cd` between calls — each remote command would start
-in the home directory. shunt keeps cwd **per session**: a remote state file
-`/tmp/shunt-cwd-<sid>` holds the last directory. The wrapper does
-`cd "$(cat <state> || echo $HOME)"`, then installs a `trap … EXIT` that records
-`$?` and writes `pwd` back to the state file on **every** exit — including an
-explicit `exit N` inside the command — so both the cwd and the real exit code
-survive.
+in the home directory. shunt keeps cwd **per session**: a state file on the
+**remote** host, `$HOME/.cache/shunt/cwd-<session_id>`, holds the last directory.
+The wrapper does `cd "$(cat <state> || echo $HOME)"`, then installs a `trap … EXIT`
+that records `$?` and writes `pwd` back to the state file on **every** exit —
+including an explicit `exit N` inside the command — so both the cwd and the real
+exit code survive.
 
-⚠ That state is keyed **by session, not by host** (only the ControlMaster socket
-is per-session *and* per-destination). Switch `@web-01 → @web-02` inside one
-session and the second host inherits the last directory from the first; if that
-path does not exist there, the shell quietly starts in `$HOME`. A known boundary.
+`$HOME` is expanded **over there**, by the far shell, and it is the account you
+land in — not the account running the hook. The directory is created `-m 700`
+(the file is a trail of the directories you work in), and the write is grouped
+and silenced *as a whole*: a bare `pwd > FILE 2>/dev/null` silences `pwd` but not
+the **shell's** "No such file or directory" for a file it cannot open — that one
+is raised before `pwd` ever runs, since redirections are applied left to right,
+and it would surface in the stderr of *your* command as if your own work had
+produced it. `.cache` rather than a state directory of its own is deliberate:
+losing this file costs one forgotten `cd`, so being swept by a cache cleaner is
+exactly the semantics wanted.
+
+The first command after a switch pays the housekeeping the others are too quiet
+to pay. It **probes** the write out loud — silenced on every ordinary command, a
+home that cannot be written to would otherwise cost the session its memory of
+every `cd` without a word — and it sweeps `cwd-*` files older than 30 days,
+because a session id is born and never dies and the directory would otherwise
+grow one file per session forever. Doing either on every command would mean a
+`find` over the host's disk to delete nothing, several times a minute, and a line
+of output where silence is the contract. The price, plainly: a home that becomes
+unwritable *mid*-session is not reported until the next switch — the hook builds
+a command, it never sees what came back.
+
+⚠ That state lives on the **far** machine, in the **landing account's** home, and
+carries the session id in its name — so it is per session **and** per host **and**
+per account. Switching `@web-01 → @web-02` inside one session carries no directory
+over: the second host reads its own state file, which does not exist yet, so the
+first command there starts in `$HOME`. Two aliases onto one machine with different
+accounts (`deploy@web-01`, `root@web-01`) keep separate directories for the same
+reason. Two aliases that land in the **same** account on the same machine are the
+one case that does carry over — one home, one file, one shell world — so
+switching between them keeps the directory. The ControlMaster socket is the local
+counterpart of the same rule (per session *and* per destination); it is the one
+path that stays in `/tmp`, on purpose, because it is a local file meant to die
+with the machine.
 
 ⚠ **The CLI does not read that state at all** — `ssh_argv()` carries no `cd`, so
 every `shunt run` / `read` / `edit` / `get` starts in the ssh **login** directory
@@ -493,6 +523,8 @@ hosts                      the previous format, still read when shunt.toml is ab
 target.<session_id>        active alias for a session (absent = local)
 active-host.<session_id>   sidecar: current routing target (for status displays)
 warned.<session_id>        the host this session was already warned about (see §3)
+switched.<session_id>      armed by `@<alias>`, spent by the first command after it —
+                             the one that pays the far side's housekeeping (see §5)
 audit.log                  one record per command sent to a host (hook and CLI alike),
                              one line each — a multi-line command is folded
 checkouts/manifest.json    checked-out files: local path → host, remote path, base SHA
@@ -574,8 +606,10 @@ of this.
 Collected in one place, because each is a boundary rather than a pending fix:
 
 - **An interrupted foreground command keeps running** on the far machine (§4).
-- **cwd is per session, not per host** — switching hosts inside one session
-  inherits the previous host's directory (§5).
+- **cwd does not follow you across hosts** — the state file lives on each host,
+  in the landing account's home, so the first command after a switch starts in
+  `$HOME` there. Two aliases landing in the *same* account on the same machine
+  are the exception: one home, one file, so the directory does carry over (§5).
 - **The CLI does not share the session's cwd** — every subcommand starts in the
   ssh login directory (§5).
 - **`shunt checkout` has no size cap**, while `edit` and `commit` do (§7).

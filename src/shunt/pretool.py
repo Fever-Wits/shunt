@@ -359,6 +359,28 @@ def warn_if_off_mode(tool, sid):
              f"`shunt run @{alias} \"grep -rn PATTERN /path\"`. (said once per host)")
 
 
+def _just_switched(sid, alias):
+    """True on the FIRST command after `@alias`, and only that one.
+
+    Remembered in a file beside the session's other markers, the same shape as
+    _warned_before: the switch arms it, the first command spends it. That one command is
+    where the far side's housekeeping is paid — see _remote_script. Doing it on every
+    command would mean a `find` over someone's disk, several times a minute, to delete
+    nothing, and a line of output where silence is the contract.
+    """
+    path = os.path.join(CONF, "switched." + sid)
+    try:
+        with open(path) as f:
+            fresh = f.read().strip() == alias
+    except Exception:
+        return False
+    try:
+        os.remove(path)
+    except OSError:
+        pass            # best-effort: a repeated sweep beats a crash
+    return fresh
+
+
 def resolve_host(alias):
     """Alias → {'alias', 'target', 'key'} or None.
 
@@ -373,8 +395,90 @@ def resolve_host(alias):
         return None
 
 
-def ssh_command(host, cmd, sid):
+# ── where the far side remembers this session's directory ─────────────────────
+# A path written for the REMOTE shell, never for os.path: `$HOME` is the account we LAND
+# IN over there, which is routinely not the one running this hook (a local user → remote
+# root), and the rewritten command runs in a sandbox with no home of ours at all.
+# Expanding it HERE would bake a local home into a remote path — a directory that is not
+# on the far machine — and the state would quietly never be written again.
+# ⚠ Never shlex.quote THIS: single quotes hand `$HOME` over as five literal characters,
+# and the far shell then makes a directory by that name wherever the command landed. Only
+# the session id is quoted (see _state_file) — it is the part that arrives from outside.
+# ⚠ Not a twin of the ControlMaster socket in ssh_command: that one is a LOCAL file and
+# stays in /tmp on purpose. These two look alike and are not.
+# `.cache` and not a state directory of its own: losing this file costs one forgotten
+# `cd`, so being swept by a cache cleaner is exactly the semantics we want.
+REMOTE_STATE_DIR = '"$HOME"/.cache/shunt'
+
+# A session id is born and never dies, so the directory would grow one file per session
+# forever. Swept ONCE per switch (see _remote_script) — on every command it would be a
+# `find` over someone's disk to delete nothing, several times a minute.
+REMOTE_STATE_TRIM = f"find {REMOTE_STATE_DIR} -maxdepth 1 -name 'cwd-*' -mtime +30 -delete 2>/dev/null"
+
+
+def _state_file(sid):
+    """This session's cwd file, as the FAR shell will read it.
+
+    The id is quoted because it arrives from outside (the harness' JSON); the directory
+    around it must NOT be — see REMOTE_STATE_DIR.
+    """
+    return f"{REMOTE_STATE_DIR}/cwd-{shlex.quote(sid)}"
+
+
+def _state_write(sid):
+    """The far-shell group that records the cwd — the one place that knows how it is written.
+
+    Grouped and silenced AS A WHOLE, deliberately: `pwd > FILE 2>/dev/null` silences pwd,
+    but the "No such file or directory" for a file that cannot be OPENED comes from the
+    shell, before pwd ever runs, and redirections are applied left to right — so it lands
+    in the stderr of the CALLER's command, where it reads as output of their own work.
+    The braces put /dev/null in place first, in every POSIX shell, instead of trusting one
+    of them to order the two our way.
+
+    `mkdir` rides WITH the write and not with the read: only the writer needs the directory
+    (a missing one reads as "no cwd yet" — the cat falls back to $HOME), and riding along
+    heals a directory removed between two commands. `-m 700` because the file is a trail of
+    the directories someone works in; it applies at CREATION only, so a directory that is
+    already there keeps the permissions its owner gave it.
+    """
+    return f"{{ mkdir -m 700 -p {REMOTE_STATE_DIR}; pwd > {_state_file(sid)}; }} 2>/dev/null"
+
+
+def _remote_script(cmd, sid, switched=False):
+    """What runs on the far machine: restore the cwd → (housekeeping) → arm the trap → run.
+
+    `switched` marks the FIRST command after `@alias` — the single moment a session pays
+    for housekeeping, and the only place it can be paid: the write is silenced on every
+    other command, so a home that cannot be written to would cost the session its memory
+    of every `cd` without a word. Once per switch it is PROBED instead — the same write
+    the trap will do, out loud when it fails. A line on every command would be wallpaper,
+    and wallpaper is silent exactly when it needs to speak (the same budget the file-tool
+    warning is kept on, see _warned_before).
+    ⊸ the price, said plainly: a home that becomes unwritable MID-session is not reported
+      until the next switch. Nothing here can see the far side between commands — the hook
+      builds the command, it never sees what came back.
+    """
+    lines = [f'cd "$(cat {_state_file(sid)} 2>/dev/null || echo "$HOME")" 2>/dev/null || cd ~']
+    if switched:
+        lines.append(REMOTE_STATE_TRIM)
+        lines.append(f'{_state_write(sid)} || echo "shunt: cannot write" {REMOTE_STATE_DIR} '
+                     f'"- this session will not remember its working directory '
+                     f'(every command starts at $HOME)" >&2')
+    # trap EXIT captures the code + updates cwd on EVERY exit (incl. `exit N` in the
+    # command). `rc` is taken first and spent last, so no bookkeeping in here can change
+    # what the caller's command returned.
+    trap_action = f"rc=$?; {_state_write(sid)}; exit $rc"
+    lines.append(f"trap {shlex.quote(trap_action)} EXIT")
+    return "\n".join(lines) + "\n" + cmd
+
+
+def ssh_command(host, cmd, sid, switched=False):
     """ssh + ControlMaster; cwd is kept per session via a remote state-file.
+
+    ⚠ The ControlMaster socket below is the one path here that stays in /tmp, and on
+    purpose: it is a LOCAL file, it is meant to die with the machine, and a unix socket
+    path has ~104 characters to live in. The cwd state-file is the FAR side's and lives in
+    that side's home — see REMOTE_STATE_DIR. The two are not twins.
 
     Deliberately NO -tt, even though it would fix the one thing this transport does not
     do — killing a command on the far side when the local ssh dies. Measured and
@@ -390,14 +494,7 @@ def ssh_command(host, cmd, sid):
     # in the same session share one socket and commands go to the wrong host. %r is the
     # USER: two aliases onto one machine with different accounts (the config allows it)
     # would otherwise ride the first one's master and run as the wrong account.
-    state = f"/tmp/shunt-cwd-{sid}"
-    # trap EXIT captures the code + updates cwd on EVERY exit (incl. `exit N` in the command)
-    trap_action = f"rc=$?; pwd > {shlex.quote(state)} 2>/dev/null; exit $rc"
-    remote = (
-        f'cd "$(cat {shlex.quote(state)} 2>/dev/null || echo "$HOME")" 2>/dev/null || cd ~\n'
-        + "trap " + shlex.quote(trap_action) + " EXIT\n"
-        + cmd
-    )
+    remote = _remote_script(cmd, sid, switched)
     opts = ["-o", "StrictHostKeyChecking=accept-new",
             "-o", "ControlMaster=auto", "-o", "ControlPath=" + sock,
             "-o", "ControlPersist=300", "-o", "BatchMode=yes"]
@@ -455,6 +552,11 @@ def main():
             os.remove(os.path.join(CONF, "warned." + sid))
         except OSError:
             pass
+        # and the armed switch-marker: there is no far machine left to keep house on
+        try:
+            os.remove(os.path.join(CONF, "switched." + sid))
+        except OSError:
+            pass
         echo("[shunt] mode: LOCAL")
         sys.exit(0)
     elif s == "@status":
@@ -473,6 +575,13 @@ def main():
                 f.write(alias)
         except Exception:
             sys.exit(0)
+        # arm the one-shot marker: the command AFTER a switch is the one that pays for
+        # the far side's housekeeping — see _remote_script
+        try:
+            with open(os.path.join(CONF, "switched." + sid), "w") as f:
+                f.write(alias)
+        except Exception:
+            pass                        # a missing marker may not cost the switch
         echo(f"[shunt] mode: REMOTE → {alias} ({host['target']})")
         sys.exit(0)
 
@@ -497,7 +606,9 @@ def main():
         except Exception:
             pass
         audit(sid, alias, cmd)
-        emit(ssh_command(host, cmd, sid))
+        # spent here and nowhere else: _just_switched removes the marker it reads, so the
+        # housekeeping inside the script rides on the first command after a switch only
+        emit(ssh_command(host, cmd, sid, _just_switched(sid, alias)))
 
     sys.exit(0)
 
