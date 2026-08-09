@@ -418,7 +418,7 @@ def cmd_install(argv):
     if key:
         sb[1:1] = ["-i", os.path.expanduser(key)]
     sb.append(dest)
-    # 1) python3 on the server (needed for edit_helper)
+    # 1) python3 on the server (needed for edit_helper / write_helper)
     r = subprocess.run(sb + ["python3 --version"], capture_output=True)
     if r.returncode != 0:
         die(f"python3 missing on {host_ip}: {(r.stderr or b'').decode()[:200]}")

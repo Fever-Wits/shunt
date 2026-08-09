@@ -306,13 +306,34 @@ def _trim_audit(path, drop_months, ceiling):
     os.replace(tmp, path)
 
 
+# The routing file is read as THREE states, not two (see read_target). This is the third:
+# the file is there and it does not name a host. An object and not a string, so nothing can
+# produce it by accident and `is` is the only way to ask for it.
+BROKEN_TARGET = object()
+
+
 def read_target(sid):
-    """Alias of the host this session is routed to, or "" for local."""
+    """Alias of the host this session is routed to · "" for local · BROKEN_TARGET.
+
+    ABSENT is the ordinary local state — no switch was ever made, so there is nothing to
+    say. PRESENT while naming no host is a different thing entirely: a write that was
+    torn, a file someone emptied, a directory in the way. Both used to come back as "",
+    and the next command then ran HERE without a word, on the machine the caller may well
+    believe they left. For a tool whose default is "run it here", every quiet fall to the
+    default is a fall to the wrong machine — so the two are told apart, and the callers
+    refuse instead of assuming.
+
+    A HALF-written alias is not this state and needs no new handling: it names a host that
+    does not resolve, and main() already refuses on that.
+    """
     try:
         with open(os.path.join(CONF, "target." + sid)) as f:
-            return f.read().strip()
+            alias = f.read().strip()
+    except FileNotFoundError:
+        return ""                       # never switched — the ordinary local session
     except Exception:
-        return ""
+        return BROKEN_TARGET            # it IS there; we cannot say where it points
+    return alias or BROKEN_TARGET
 
 
 def _warned_before(sid, alias):
@@ -344,6 +365,30 @@ def _warned_before(sid, alias):
 def warn_if_off_mode(tool, sid):
     """Warn when a tool that ignores @host mode runs while the session is remote."""
     alias = read_target(sid)
+    if alias is BROKEN_TARGET:
+        # Neither local nor a host: the file that says where this session is routed is
+        # there and unreadable. Silence would leave these tools reading the LOCAL disk
+        # under a mode nobody can name — the very silence this function exists to end —
+        # and naming a host we have not read would be worse, since the hook may never
+        # state what it has not verified. Same once-per-value budget as below, so it
+        # cannot become wallpaper; "?" is not an alias any switch can write.
+        if tool == "Agent":
+            # OFF that budget, exactly as in the readable case below: every spawn is a new
+            # agent inheriting the state, and the budget is SHARED with the file tools —
+            # one Grep would spend it and the next agent would be born into silence. What
+            # it inherits is worse than a wrong disk, too: while the routing is unreadable
+            # main() refuses every bash command, so the agent works with no bash at all.
+            warn("⚠ shunt: this session's routing state is unreadable — whether you are "
+                 "local or on a host cannot be said, and a spawned agent INHERITS that "
+                 "state: its bash commands are REFUSED until the routing is settled, and "
+                 "its file tools read the LOCAL disk meanwhile. `@status` to look, then "
+                 "`@local` or `@<alias>` to settle it.")
+        if not _warned_before(sid, "?"):
+            warn("⚠ shunt: this session's routing state is unreadable — whether you are "
+                 f"local or on a host cannot be said. {tool} works on the LOCAL disk either "
+                 "way. `@status` to look, then `@local` or `@<alias>` to settle it. "
+                 "(said once)")
+        return
     if not alias:
         return                                  # local — nothing to warn about
     if tool == "Agent":
@@ -357,6 +402,58 @@ def warn_if_off_mode(tool, sid):
         warn(f"⚠ shunt: you are on @{alias}, but {tool} works on the LOCAL disk — the mode covers "
              f"bash only. Remote file → `shunt read/edit @{alias} …`; remote search → "
              f"`shunt run @{alias} \"grep -rn PATTERN /path\"`. (said once per host)")
+
+
+# ── the one line that must NOT be redirected ──────────────────────────────────
+# `shunt …` does its own transport, so it runs HERE whatever mode the session is in. The
+# PREFIX, though, only speaks for the FIRST command on the line: everything past a `;`, a
+# `|`, a `&&` or a `$(…)` is a different command, and letting the prefix speak for it runs
+# THAT one here, on the machine the caller believes they left. The two directions of the
+# mistake are not symmetric — a shunt command sent to a host comes back loudly as "command
+# not found", while `shunt hosts; rm -rf /var/log/*` succeeds, locally, in silence: the
+# mirror of a guarded error is rarely guarded as well.
+# So only a line that can hold no second command passes; the rest is SAID and not run —
+# the failure falls to refusal and never to the default, and the default here is HERE.
+# Split on the RAW text, deliberately: a separator inside quotes costs a refusal nobody
+# needed, never a command that leaves unnoticed.
+# ⚠ The boundary, named so it is not read as an oversight: a REDIRECTION (`>` `>>` `2>`
+# `<`) is deliberately NOT in the class. It cannot hide a second command — one still needs
+# a separator that IS in the class — and adding it would refuse the legitimate
+# `shunt read @h /etc/nginx.conf > local.txt`. What a redirection DOES do is silent: its
+# target lands on THIS machine. Which is where the `shunt` CLI runs anyway, so nothing
+# crosses a machine boundary unnoticed — the write is beside the tool that made it.
+SHELL_BREAK = re.compile(r"[;&|`$(\n]")
+
+
+def _shunt_cli_here_or_refuse(s, sid):
+    """Let a `shunt …` line run locally — or say why it will not run at all. Never returns.
+
+    A refusal and not a warning: warn() ALLOWS the call, and allowing it is precisely the
+    defect. echo() is what this file already refuses with (see the unresolvable alias in
+    main()) — the command is replaced by the message, so the caller reads what happened
+    instead of learning it from what it did.
+
+    A LOCAL session passes through untouched: nothing is routed anywhere, so
+    `shunt hosts | grep web` is ordinary work and refusing it would be noise. The price of
+    the other side, said plainly: in remote mode that same pipe is refused too, because
+    nothing here can tell which half of the line was meant for the far machine. The way
+    out is one line, and the message carries it.
+    """
+    hit = SHELL_BREAK.search(s)
+    if not hit:
+        sys.exit(0)                  # one shunt command, one machine — as it always was
+    alias = read_target(sid)
+    if alias == "":
+        sys.exit(0)                  # local session — there is no other machine in play
+    where = (f"on @{alias}" if alias is not BROKEN_TARGET
+             else "routed somewhere this hook cannot read")
+    # Named out here rather than inside the message: a `\n` may not appear in an f-string
+    # expression before python 3.12, and this file still runs on 3.11.
+    seen = "newline" if hit.group(0) == "\n" else hit.group(0)
+    echo("[shunt] NOT run. `shunt …` runs on THIS machine — and so would the rest of this "
+         f"line, everything past the `{seen}`, while the session is {where}. Send the "
+         "`shunt …` part as its own command (it runs here in any mode) and the rest as "
+         "another; or `@local` first, if the whole line was meant for this machine.")
 
 
 def _just_switched(sid, alias):
@@ -532,9 +629,10 @@ def main():
 
     s = cmd.strip()
 
-    # shunt CLI commands run LOCALLY (they do the transport themselves) → do not redirect
+    # shunt CLI commands run LOCALLY (they do the transport themselves) → do not redirect.
+    # Only as far as the line IS one command, though — see _shunt_cli_here_or_refuse.
     if s == "shunt" or s.startswith("shunt "):
-        sys.exit(0)
+        _shunt_cli_here_or_refuse(s, sid)     # never returns: runs here, or says why not
 
     # --- switches ---
     if s == "@local":
@@ -561,6 +659,11 @@ def main():
         sys.exit(0)
     elif s == "@status":
         t = read_target(sid)
+        if t is BROKEN_TARGET:
+            # "LOCAL" here would be the one answer the caller acts on and the one the
+            # hook has not verified. echo() exits.
+            echo(f"[shunt] UNKNOWN — {target_file} is there but names no host. `@local` to "
+                 "be local on purpose, or `@<alias>` to route again.")
         echo("[shunt] " + (("REMOTE → " + t) if t else "LOCAL"))
         sys.exit(0)
     elif s.startswith("@") and len(s) > 1 and " " not in s:
@@ -570,11 +673,28 @@ def main():
             echo("[shunt] unknown host: " + alias)
             sys.exit(0)
         os.makedirs(CONF, exist_ok=True)
+        before = read_target(sid)       # what still stands if the write does not land
         try:
-            with open(target_file, "w") as f:
-                f.write(alias)
-        except Exception:
-            sys.exit(0)
+            # Through the config module's own atomic writer, because open(…, "w")
+            # TRUNCATES first: a write dying in between leaves a file that exists and
+            # names no host — the state read_target used to hand back as "local". A
+            # temp file and os.replace put it there whole or not at all, and a switch
+            # that fails leaves the PREVIOUS routing standing instead of a blank.
+            config._write_atomic(target_file, alias)
+        except Exception as e:
+            # Exiting quietly here is the same lie from the other side: the caller reads
+            # no refusal, believes they are on @alias, and their next command runs on the
+            # machine they thought they had left. Say what stands instead. The atomic
+            # write WIDENED this, too — mkstemp needs the DIRECTORY writable where
+            # open(…, "w") needed only the file, so a config dir nobody can write to now
+            # fails every switch. echo() exits: no marker is armed, nothing is announced,
+            # and the previous routing is untouched.
+            stands = ("routed somewhere this hook cannot read" if before is BROKEN_TARGET
+                      else f"on @{before}" if before else "LOCAL")
+            reason = getattr(e, "strerror", None) or e
+            echo(f"[shunt] switch to @{alias} FAILED — could not write {target_file} "
+                 f"({reason}). Nothing changed; the session is STILL {stands}. "
+                 f"Fix that and try `@{alias}` again.")
         # arm the one-shot marker: the command AFTER a switch is the one that pays for
         # the far side's housekeeping — see _remote_script
         try:
@@ -587,6 +707,13 @@ def main():
 
     # --- remote execution ---
     alias = read_target(sid)
+    if alias is BROKEN_TARGET:
+        # The same shape as the unresolvable alias below, for the same reason: the one
+        # thing that may not happen is this command running HERE while nobody can say
+        # whether the session was routed away. Say it, run nothing. echo() exits.
+        echo(f"[shunt] {target_file} is there but names no host — command NOT run (it "
+             "would have run LOCALLY, and this session may be routed away from here). "
+             "`@local` to be local on purpose, or `@<alias>` to route again.")
     if alias:
         host = resolve_host(alias)
         if not host:
