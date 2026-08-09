@@ -18,6 +18,7 @@ Coverage:
 
 ssh/rsync are stubbed everywhere — no connection is attempted.
 """
+
 import hashlib
 import io
 import json
@@ -64,15 +65,15 @@ class TmpConf:
 
 def stub_ssh(returncode=0, stdout=b"", stderr=b""):
     """Patch subprocess.run so nothing leaves the machine."""
-    return patch.object(shunt_mod.subprocess, "run",
-                        return_value=MagicMock(returncode=returncode,
-                                               stdout=stdout, stderr=stderr))
+    return patch.object(
+        shunt_mod.subprocess, "run", return_value=MagicMock(returncode=returncode, stdout=stdout, stderr=stderr)
+    )
 
 
 # ── the six subcommands that reach a host ──────────────────────────────────────
 
-class TestEachSubcommandIsRecorded(unittest.TestCase):
 
+class TestEachSubcommandIsRecorded(unittest.TestCase):
     def test_run_is_recorded(self):
         with TmpConf() as c:
             with stub_ssh():
@@ -129,27 +130,26 @@ class TestEachSubcommandIsRecorded(unittest.TestCase):
             os.makedirs(os.path.dirname(local), exist_ok=True)
             with open(local, "wb") as f:
                 f.write(content)
-            shunt_mod._manifest_save({local: {"host": "h1", "remote": "/remote/file.py",
-                                              "base_sha": sha}})
+            shunt_mod._manifest_save({local: {"host": "h1", "remote": "/remote/file.py", "base_sha": sha}})
 
             calls = {"n": 0}
 
             def fake_run(cmd, **kwargs):
                 calls["n"] += 1
-                if calls["n"] == 1:                       # sha256sum — no conflict
-                    return MagicMock(returncode=0, stderr=b"",
-                                     stdout=(sha + "  /remote/file.py\n").encode())
-                return MagicMock(returncode=0, stderr=b"",
-                                 stdout=json.dumps({"status": "ok",
-                                                    "new_sha": sha}).encode())
+                if calls["n"] == 1:  # sha256sum — no conflict
+                    return MagicMock(returncode=0, stderr=b"", stdout=(sha + "  /remote/file.py\n").encode())
+                return MagicMock(returncode=0, stderr=b"", stdout=json.dumps({"status": "ok", "new_sha": sha}).encode())
 
-            with patch.object(shunt_mod.subprocess, "run", side_effect=fake_run), \
-                 patch.object(sys, "stdout", io.StringIO()):
+            with (
+                patch.object(shunt_mod.subprocess, "run", side_effect=fake_run),
+                patch.object(sys, "stdout", io.StringIO()),
+            ):
                 shunt_mod.cmd_commit([])
             self.assertIn("[commit] /remote/file.py", c.lines()[0])
 
 
 # ── what stays out ─────────────────────────────────────────────────────────────
+
 
 class TestReadOnlyStaysOut(unittest.TestCase):
     """The log answers "what left this machine" — a read brings something back."""
@@ -163,8 +163,8 @@ class TestReadOnlyStaysOut(unittest.TestCase):
 
 # ── the shape of the record ────────────────────────────────────────────────────
 
-class TestRecordShape(unittest.TestCase):
 
+class TestRecordShape(unittest.TestCase):
     def test_a_cli_record_cannot_be_read_as_remote_bash(self):
         """`shunt run @h1 ls` and a redirected `ls` are different events."""
         with TmpConf() as c:
@@ -196,6 +196,7 @@ class TestRecordShape(unittest.TestCase):
 
 # ── the seam with the hook ─────────────────────────────────────────────────────
 
+
 class TestLocationStaysWithTheCaller(unittest.TestCase):
     """The hook's audit() is shared; the config dir is passed, never assumed.
 
@@ -219,11 +220,10 @@ class TestLocationStaysWithTheCaller(unittest.TestCase):
 
 
 class TestFailureIsSilent(unittest.TestCase):
-
     def test_an_unwritable_log_does_not_break_the_subcommand(self):
         """Auditing must never be the reason a command fails."""
         with TmpConf() as c:
-            os.mkdir(c.log)          # a directory where the log belongs → the append fails
+            os.mkdir(c.log)  # a directory where the log belongs → the append fails
             with stub_ssh(returncode=7):
                 rc = shunt_mod.cmd_run(["@h1", "false"])
             self.assertEqual(rc, 7)  # the command ran, and its exit code came back

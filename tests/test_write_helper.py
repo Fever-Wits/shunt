@@ -7,6 +7,7 @@ Drives write_helper.py exactly as shunt.cli will call it:
 
 No remote host is touched. write_helper.py is executed via subprocess on localhost.
 """
+
 import base64
 import hashlib
 import json
@@ -60,6 +61,7 @@ class TestWriteHelperNewFile(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_new_file_created_argv(self):
@@ -68,11 +70,13 @@ class TestWriteHelperNewFile(unittest.TestCase):
         path = os.path.join(self.tmpdir, "new_file.txt")
         self.assertFalse(os.path.exists(path))
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(content),
-            "base_sha": None,
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(content),
+                "base_sha": None,
+            }
+        )
 
         self.assertEqual(result["status"], "ok", result)
         self.assertTrue(result.get("verified"), result)
@@ -87,11 +91,13 @@ class TestWriteHelperNewFile(unittest.TestCase):
         path = os.path.join(self.tmpdir, "new_stdin.txt")
         self.assertFalse(os.path.exists(path))
 
-        result = run_via_stdin({
-            "file": path,
-            "content_b64": b64(content),
-            "base_sha": None,
-        })
+        result = run_via_stdin(
+            {
+                "file": path,
+                "content_b64": b64(content),
+                "base_sha": None,
+            }
+        )
 
         self.assertEqual(result["status"], "ok", result)
         self.assertEqual(result["new_sha"], sha256(content))
@@ -104,11 +110,13 @@ class TestWriteHelperNewFile(unittest.TestCase):
         path = os.path.join(self.tmpdir, "a", "b", "c", "nested.txt")
         self.assertFalse(os.path.exists(path))
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(content),
-            "base_sha": None,
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(content),
+                "base_sha": None,
+            }
+        )
 
         self.assertEqual(result["status"], "ok", result)
         self.assertTrue(os.path.exists(path))
@@ -118,11 +126,13 @@ class TestWriteHelperNewFile(unittest.TestCase):
         content = b""
         path = os.path.join(self.tmpdir, "empty.txt")
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(content),
-            "base_sha": None,
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(content),
+                "base_sha": None,
+            }
+        )
 
         self.assertEqual(result["status"], "ok", result)
         self.assertEqual(result["new_sha"], sha256(content))
@@ -133,11 +143,13 @@ class TestWriteHelperNewFile(unittest.TestCase):
         content = bytes(range(256))
         path = os.path.join(self.tmpdir, "binary.bin")
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(content),
-            "base_sha": None,
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(content),
+                "base_sha": None,
+            }
+        )
 
         self.assertEqual(result["status"], "ok", result)
         self.assertEqual(result["new_sha"], sha256(content))
@@ -147,11 +159,13 @@ class TestWriteHelperNewFile(unittest.TestCase):
         content = b"verified flag test\n"
         path = os.path.join(self.tmpdir, "verify.txt")
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(content),
-            "base_sha": None,
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(content),
+                "base_sha": None,
+            }
+        )
 
         self.assertIs(result.get("verified"), True, result)
 
@@ -164,6 +178,7 @@ class TestWriteHelperExistingFileCorrectSha(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _make_file(self, content: bytes) -> str:
@@ -179,11 +194,13 @@ class TestWriteHelperExistingFileCorrectSha(unittest.TestCase):
         path = self._make_file(old_content)
         base_sha = sha256(old_content)
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(new_content),
-            "base_sha": base_sha,
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(new_content),
+                "base_sha": base_sha,
+            }
+        )
 
         self.assertEqual(result["status"], "ok", result)
         self.assertTrue(result.get("verified"), result)
@@ -198,11 +215,13 @@ class TestWriteHelperExistingFileCorrectSha(unittest.TestCase):
         path = self._make_file(old_content)
         base_sha = sha256(old_content)
 
-        result = run_via_stdin({
-            "file": path,
-            "content_b64": b64(new_content),
-            "base_sha": base_sha,
-        })
+        result = run_via_stdin(
+            {
+                "file": path,
+                "content_b64": b64(new_content),
+                "base_sha": base_sha,
+            }
+        )
 
         self.assertEqual(result["status"], "ok", result)
         self.assertEqual(result["new_sha"], sha256(new_content))
@@ -213,11 +232,13 @@ class TestWriteHelperExistingFileCorrectSha(unittest.TestCase):
         new_content = b"new content body\n"
         path = self._make_file(old_content)
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(new_content),
-            "base_sha": sha256(old_content),
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(new_content),
+                "base_sha": sha256(old_content),
+            }
+        )
 
         self.assertEqual(result["new_sha"], sha256(new_content))
         # also verify via independent read
@@ -232,11 +253,13 @@ class TestWriteHelperExistingFileCorrectSha(unittest.TestCase):
         os.chmod(path, 0o644)
         original_mode = os.stat(path).st_mode & 0o777
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(b"new\n"),
-            "base_sha": sha256(old_content),
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(b"new\n"),
+                "base_sha": sha256(old_content),
+            }
+        )
 
         self.assertEqual(result["status"], "ok", result)
         new_mode = os.stat(path).st_mode & 0o777
@@ -249,18 +272,22 @@ class TestWriteHelperExistingFileCorrectSha(unittest.TestCase):
         content3 = b"version 3\n"
         path = self._make_file(content1)
 
-        r1 = run_via_argv({
-            "file": path,
-            "content_b64": b64(content2),
-            "base_sha": sha256(content1),
-        })
+        r1 = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(content2),
+                "base_sha": sha256(content1),
+            }
+        )
         self.assertEqual(r1["status"], "ok")
 
-        r2 = run_via_argv({
-            "file": path,
-            "content_b64": b64(content3),
-            "base_sha": r1["new_sha"],    # use the returned sha as next base
-        })
+        r2 = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(content3),
+                "base_sha": r1["new_sha"],  # use the returned sha as next base
+            }
+        )
         self.assertEqual(r2["status"], "ok")
         self.assertEqual(r2["new_sha"], sha256(content3))
 
@@ -273,6 +300,7 @@ class TestWriteHelperWrongSha(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _make_file(self, content: bytes) -> str:
@@ -287,11 +315,13 @@ class TestWriteHelperWrongSha(unittest.TestCase):
         path = self._make_file(content)
         wrong_sha = "a" * 64  # obviously wrong
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(b"attacker content\n"),
-            "base_sha": wrong_sha,
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(b"attacker content\n"),
+                "base_sha": wrong_sha,
+            }
+        )
 
         self.assertEqual(result["status"], "conflict", result)
 
@@ -301,11 +331,13 @@ class TestWriteHelperWrongSha(unittest.TestCase):
         path = self._make_file(content)
         wrong_sha = "b" * 64
 
-        run_via_argv({
-            "file": path,
-            "content_b64": b64(b"should not appear\n"),
-            "base_sha": wrong_sha,
-        })
+        run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(b"should not appear\n"),
+                "base_sha": wrong_sha,
+            }
+        )
 
         with open(path, "rb") as f:
             self.assertEqual(f.read(), content)
@@ -316,11 +348,13 @@ class TestWriteHelperWrongSha(unittest.TestCase):
         path = self._make_file(content)
         expected_current_sha = sha256(content)
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(b"new\n"),
-            "base_sha": "0" * 64,
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(b"new\n"),
+                "base_sha": "0" * 64,
+            }
+        )
 
         self.assertEqual(result["status"], "conflict")
         self.assertEqual(result.get("current_sha"), expected_current_sha)
@@ -331,11 +365,13 @@ class TestWriteHelperWrongSha(unittest.TestCase):
         path = self._make_file(content)
         provided = "c" * 64
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(b"new\n"),
-            "base_sha": provided,
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(b"new\n"),
+                "base_sha": provided,
+            }
+        )
 
         self.assertEqual(result.get("base_sha"), provided)
 
@@ -347,18 +383,22 @@ class TestWriteHelperWrongSha(unittest.TestCase):
         sha_v1 = sha256(content_v1)
 
         # advance the file to v2 with a correct write
-        run_via_argv({
-            "file": path,
-            "content_b64": b64(content_v2),
-            "base_sha": sha_v1,
-        })
+        run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(content_v2),
+                "base_sha": sha_v1,
+            }
+        )
 
         # now attempt to write using the old sha_v1 → conflict
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(b"attacker\n"),
-            "base_sha": sha_v1,
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(b"attacker\n"),
+                "base_sha": sha_v1,
+            }
+        )
 
         self.assertEqual(result["status"], "conflict")
         with open(path, "rb") as f:
@@ -369,11 +409,13 @@ class TestWriteHelperWrongSha(unittest.TestCase):
         path = os.path.join(self.tmpdir, "does_not_exist.txt")
         self.assertFalse(os.path.exists(path))
 
-        result = run_via_argv({
-            "file": path,
-            "content_b64": b64(b"new\n"),
-            "base_sha": "d" * 64,   # wrong sha for a non-existent file
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": b64(b"new\n"),
+                "base_sha": "d" * 64,  # wrong sha for a non-existent file
+            }
+        )
 
         # current_sha of a missing file is None; base_sha is non-null → mismatch → conflict
         self.assertEqual(result["status"], "conflict")
@@ -389,6 +431,7 @@ class TestWriteHelperSizeGuard(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _env_with_limit(self, max_bytes: int) -> dict:
@@ -410,16 +453,22 @@ class TestWriteHelperSizeGuard(unittest.TestCase):
         self.assertGreater(len(b64_str), max_bytes * 2)
 
         path = os.path.join(self.tmpdir, "oversized.txt")
-        payload_b64 = base64.b64encode(json.dumps({
-            "file": path,
-            "content_b64": b64_str,
-            "base_sha": None,
-        }).encode()).decode()
+        payload_b64 = base64.b64encode(
+            json.dumps(
+                {
+                    "file": path,
+                    "content_b64": b64_str,
+                    "base_sha": None,
+                }
+            ).encode()
+        ).decode()
 
         env = self._env_with_limit(max_bytes)
         r = subprocess.run(
             [PYTHON, WRITE_HELPER, payload_b64],
-            capture_output=True, text=True, env=env,
+            capture_output=True,
+            text=True,
+            env=env,
         )
         result = json.loads(r.stdout.strip())
 
@@ -437,22 +486,28 @@ class TestWriteHelperSizeGuard(unittest.TestCase):
         # We set MAX=10 and content of 11 bytes → b64 ~16 chars, 2*MAX=20 → first guard passes,
         # second guard (11 > 10) catches it.
         max_bytes = 10
-        content = b"X" * (max_bytes + 1)   # 11 bytes
+        content = b"X" * (max_bytes + 1)  # 11 bytes
         b64_str = b64(content)
         # confirm first guard does NOT trigger
         self.assertLessEqual(len(b64_str), max_bytes * 2 + 4)  # ~16 <= 24, passes first check
 
         path = os.path.join(self.tmpdir, "boundary.txt")
-        payload_b64 = base64.b64encode(json.dumps({
-            "file": path,
-            "content_b64": b64_str,
-            "base_sha": None,
-        }).encode()).decode()
+        payload_b64 = base64.b64encode(
+            json.dumps(
+                {
+                    "file": path,
+                    "content_b64": b64_str,
+                    "base_sha": None,
+                }
+            ).encode()
+        ).decode()
 
         env = self._env_with_limit(max_bytes)
         r = subprocess.run(
             [PYTHON, WRITE_HELPER, payload_b64],
-            capture_output=True, text=True, env=env,
+            capture_output=True,
+            text=True,
+            env=env,
         )
         result = json.loads(r.stdout.strip())
 
@@ -462,18 +517,24 @@ class TestWriteHelperSizeGuard(unittest.TestCase):
     def test_content_at_exact_limit_succeeds(self):
         """Content at exactly MAX_BYTES passes (boundary: size == MAX, not >)."""
         max_bytes = 20
-        content = b"Y" * max_bytes   # exactly 20 bytes
+        content = b"Y" * max_bytes  # exactly 20 bytes
         path = os.path.join(self.tmpdir, "exact_limit.txt")
-        payload_b64 = base64.b64encode(json.dumps({
-            "file": path,
-            "content_b64": b64(content),
-            "base_sha": None,
-        }).encode()).decode()
+        payload_b64 = base64.b64encode(
+            json.dumps(
+                {
+                    "file": path,
+                    "content_b64": b64(content),
+                    "base_sha": None,
+                }
+            ).encode()
+        ).decode()
 
         env = self._env_with_limit(max_bytes)
         r = subprocess.run(
             [PYTHON, WRITE_HELPER, payload_b64],
-            capture_output=True, text=True, env=env,
+            capture_output=True,
+            text=True,
+            env=env,
         )
         result = json.loads(r.stdout.strip())
 
@@ -488,13 +549,15 @@ class TestWriteHelperBadInput(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_bad_base64_argv(self):
         """Corrupted base64 argv → error (bad request)."""
         r = subprocess.run(
             [PYTHON, WRITE_HELPER, "not-valid-base64!!!"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         result = json.loads(r.stdout.strip())
         self.assertEqual(result["status"], "error")
@@ -505,7 +568,8 @@ class TestWriteHelperBadInput(unittest.TestCase):
         r = subprocess.run(
             [PYTHON, WRITE_HELPER],
             input="{not valid json",
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         result = json.loads(r.stdout.strip())
         self.assertEqual(result["status"], "error")
@@ -513,10 +577,12 @@ class TestWriteHelperBadInput(unittest.TestCase):
     def test_bad_b64_content_field(self):
         """content_b64 field contains invalid base64 → error."""
         path = os.path.join(self.tmpdir, "bad_b64.txt")
-        result = run_via_argv({
-            "file": path,
-            "content_b64": "this is not base64!!!",
-            "base_sha": None,
-        })
+        result = run_via_argv(
+            {
+                "file": path,
+                "content_b64": "this is not base64!!!",
+                "base_sha": None,
+            }
+        )
         self.assertEqual(result["status"], "error")
         self.assertFalse(os.path.exists(path))

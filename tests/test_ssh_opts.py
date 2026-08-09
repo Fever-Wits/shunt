@@ -13,6 +13,7 @@ Coverage:
 Why this file exists: the options were written TWICE — once in ssh_argv, once inside
 cmd_cp — and the copy fell behind the original. This is the test that makes them one.
 """
+
 import os
 import shutil
 import sys
@@ -33,10 +34,12 @@ class TmpHosts:
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-opts-")
         with open(os.path.join(self.dir, "shunt.toml"), "w") as f:
-            f.write('key = "/keys/default"\n'
-                    '[hosts]\n'
-                    'keyed = "root@10.0.0.1"\n'
-                    'own = { target = "root@10.0.0.2", key = "/keys/own" }\n')
+            f.write(
+                'key = "/keys/default"\n'
+                "[hosts]\n"
+                'keyed = "root@10.0.0.1"\n'
+                'own = { target = "root@10.0.0.2", key = "/keys/own" }\n'
+            )
         self._orig = shunt_mod.CONF
         shunt_mod.CONF = self.dir
         return self
@@ -62,8 +65,8 @@ def rsync_ssh_string(argv):
 
 # ── one source, not two ────────────────────────────────────────────────────────
 
-class TestSingleSource(unittest.TestCase):
 
+class TestSingleSource(unittest.TestCase):
     def test_ssh_argv_is_built_from_ssh_opts(self):
         host = {"alias": "h", "target": "root@10.0.0.1", "key": None}
         opts = shunt_mod.ssh_opts(host)
@@ -81,8 +84,8 @@ class TestSingleSource(unittest.TestCase):
 
 # ── the two options cp used to lack ────────────────────────────────────────────
 
-class TestCpRegressions(unittest.TestCase):
 
+class TestCpRegressions(unittest.TestCase):
     def test_cp_gets_batchmode(self):
         """Without it, cp can sit forever on a password prompt inside a script."""
         with TmpHosts():
@@ -103,8 +106,8 @@ class TestCpRegressions(unittest.TestCase):
 
 # ── the key ────────────────────────────────────────────────────────────────────
 
-class TestKey(unittest.TestCase):
 
+class TestKey(unittest.TestCase):
     def test_default_key_is_passed(self):
         with TmpHosts():
             self.assertIn("/keys/default", rsync_ssh_string(["@keyed:/r", "/l"]))
@@ -127,6 +130,7 @@ class TestKey(unittest.TestCase):
 
 
 # ── the third copy: the hook's own socket ──────────────────────────────────────
+
 
 class TestHookControlPath(unittest.TestCase):
     """A muxed connection is shared by whoever names the same socket.

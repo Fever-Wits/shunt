@@ -23,6 +23,7 @@ Coverage:
 
 Everything happens in a temp SHUNT_CONF — no real config is read or written.
 """
+
 import io
 import json
 import os
@@ -45,15 +46,16 @@ PRETOOL = os.path.join(os.path.dirname(shunt_mod.__file__), "pretool.py")
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
+
 class TmpConf:
     """Context manager: an empty temp conf dir, also bound to the CLI's CONF."""
 
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-config-")
-        self.said = ""                              # whatever the loader put on stderr
+        self.said = ""  # whatever the loader put on stderr
         self._orig = shunt_mod.CONF
         shunt_mod.CONF = self.dir
-        shunt_config._legacy_notice_said = False    # the notice is once PER PROCESS
+        shunt_config._legacy_notice_said = False  # the notice is once PER PROCESS
         return self
 
     def __exit__(self, *_):
@@ -84,8 +86,8 @@ class TmpConf:
 
 # ── reading shunt.toml ─────────────────────────────────────────────────────────
 
-class TestTomlReading(unittest.TestCase):
 
+class TestTomlReading(unittest.TestCase):
     def test_plain_string_is_the_target(self):
         with TmpConf() as c:
             c.write("shunt.toml", '[hosts]\nweb-01 = "user@203.0.113.10"\n')
@@ -93,9 +95,7 @@ class TestTomlReading(unittest.TestCase):
 
     def test_inline_table_carries_target_and_key(self):
         with TmpConf() as c:
-            c.write("shunt.toml",
-                    '[hosts]\n'
-                    'special = { target = "root@10.0.0.9", key = "/keys/other" }\n')
+            c.write("shunt.toml", '[hosts]\nspecial = { target = "root@10.0.0.9", key = "/keys/other" }\n')
             host = c.resolve("special")
             self.assertEqual(host["target"], "root@10.0.0.9")
             self.assertEqual(host["key"], "/keys/other")
@@ -113,8 +113,7 @@ class TestTomlReading(unittest.TestCase):
 
     def test_several_hosts_are_all_read(self):
         with TmpConf() as c:
-            c.write("shunt.toml",
-                    '[hosts]\na = "root@10.0.0.1"\nb = "root@10.0.0.2"\n')
+            c.write("shunt.toml", '[hosts]\na = "root@10.0.0.1"\nb = "root@10.0.0.2"\n')
             self.assertEqual(sorted(c.hosts()), ["a", "b"])
 
 
@@ -128,10 +127,12 @@ class TestKeys(unittest.TestCase):
 
     def test_per_host_key_wins_over_the_default(self):
         with TmpConf() as c:
-            c.write("shunt.toml",
-                    'key = "/keys/default"\n[hosts]\n'
-                    'h1 = "root@10.0.0.1"\n'
-                    'h2 = { target = "root@10.0.0.2", key = "/keys/special" }\n')
+            c.write(
+                "shunt.toml",
+                'key = "/keys/default"\n[hosts]\n'
+                'h1 = "root@10.0.0.1"\n'
+                'h2 = { target = "root@10.0.0.2", key = "/keys/special" }\n',
+            )
             self.assertEqual(c.resolve("h1")["key"], "/keys/default")
             self.assertEqual(c.resolve("h2")["key"], "/keys/special")
 
@@ -145,8 +146,7 @@ class TestKeys(unittest.TestCase):
         """ssh -i gets a path, not a shell shorthand — nothing expands it later."""
         with TmpConf() as c:
             c.write("shunt.toml", 'key = "~/.ssh/id_test"\n[hosts]\nh1 = "root@10.0.0.1"\n')
-            self.assertEqual(c.resolve("h1")["key"],
-                             os.path.expanduser("~/.ssh/id_test"))
+            self.assertEqual(c.resolve("h1")["key"], os.path.expanduser("~/.ssh/id_test"))
 
 
 class TestBrokenConfigIsLoud(unittest.TestCase):
@@ -181,6 +181,7 @@ class TestBrokenConfigIsLoud(unittest.TestCase):
 
 # ── the legacy `hosts` file ────────────────────────────────────────────────────
 
+
 class TestLegacyFallback(unittest.TestCase):
     """An existing setup keeps working — migration is the owner's move, not the tool's."""
 
@@ -192,8 +193,7 @@ class TestLegacyFallback(unittest.TestCase):
     def test_legacy_key_option_is_read(self):
         with TmpConf() as c:
             c.write("hosts", "h1 ssh root@10.0.0.1 key=~/.ssh/id_legacy\n")
-            self.assertEqual(c.resolve("h1")["key"],
-                             os.path.expanduser("~/.ssh/id_legacy"))
+            self.assertEqual(c.resolve("h1")["key"], os.path.expanduser("~/.ssh/id_legacy"))
 
     def test_comments_and_blank_lines_are_ignored(self):
         with TmpConf() as c:
@@ -253,8 +253,8 @@ class TestLegacyFallback(unittest.TestCase):
 
 # ── neither file ───────────────────────────────────────────────────────────────
 
-class TestNothingConfigured(unittest.TestCase):
 
+class TestNothingConfigured(unittest.TestCase):
     def test_no_files_means_no_hosts(self):
         with TmpConf() as c:
             self.assertEqual(c.hosts(), {})
@@ -276,8 +276,8 @@ class TestNothingConfigured(unittest.TestCase):
 
 # ── writing: what `shunt install` leaves behind ────────────────────────────────
 
-class TestAddHost(unittest.TestCase):
 
+class TestAddHost(unittest.TestCase):
     def test_creates_the_file(self):
         with TmpConf() as c:
             shunt_config.add_host(c.dir, "h1", "root@10.0.0.1")
@@ -309,22 +309,17 @@ class TestAddHost(unittest.TestCase):
     def test_replacement_stays_in_place(self):
         """The line keeps its position, so the comment above it still describes it."""
         with TmpConf() as c:
-            c.write("shunt.toml",
-                    '[hosts]\n# the fast one\nh1 = "root@10.0.0.1"\nh2 = "root@10.0.0.2"\n')
+            c.write("shunt.toml", '[hosts]\n# the fast one\nh1 = "root@10.0.0.1"\nh2 = "root@10.0.0.2"\n')
             shunt_config.add_host(c.dir, "h1", "root@10.0.0.7")
             body = c.read("shunt.toml").splitlines()
-            self.assertEqual(body.index('h1 = "root@10.0.0.7"'),
-                             body.index("# the fast one") + 1)
+            self.assertEqual(body.index('h1 = "root@10.0.0.7"'), body.index("# the fast one") + 1)
 
     def test_comments_and_other_hosts_survive(self):
         """It is the owner's file — an install may not eat what is written in it."""
         with TmpConf() as c:
-            c.write("shunt.toml",
-                    '# my machines\n'
-                    'key = "/keys/default"\n\n'
-                    '[hosts]\n'
-                    '# the fast one\n'
-                    'h1 = "root@10.0.0.1"\n')
+            c.write(
+                "shunt.toml", '# my machines\nkey = "/keys/default"\n\n[hosts]\n# the fast one\nh1 = "root@10.0.0.1"\n'
+            )
             shunt_config.add_host(c.dir, "h2", "root@10.0.0.2")
             body = c.read("shunt.toml")
             self.assertIn("# my machines", body)
@@ -362,8 +357,7 @@ class TestAddHost(unittest.TestCase):
             with patch.object(shunt_mod.subprocess, "run") as run:
                 run.return_value = subprocess.CompletedProcess([], 0, b"Python 3.11.0", b"")
                 with patch("sys.stdout", new_callable=io.StringIO):
-                    shunt_mod.cmd_install(["root@10.0.0.1", "--alias", "h1",
-                                           "--key", "~/.ssh/id_test"])
+                    shunt_mod.cmd_install(["root@10.0.0.1", "--alias", "h1", "--key", "~/.ssh/id_test"])
             self.assertEqual(c.resolve("h1")["target"], "root@10.0.0.1")
             self.assertEqual(c.resolve("h1")["key"], os.path.expanduser("~/.ssh/id_test"))
             # written down as typed, so the file travels between machines
@@ -372,15 +366,18 @@ class TestAddHost(unittest.TestCase):
 
 # ── the hook reads the same config (end-to-end) ────────────────────────────────
 
+
 class TestHookUsesTheSameConfig(unittest.TestCase):
     """The resolver is shared; the hook runs in its own process, so prove it there."""
 
     def _run_hook(self, conf_dir, command, sid="s1"):
-        payload = {"tool_name": "Bash", "session_id": sid,
-                   "tool_input": {"command": command}}
-        r = subprocess.run([sys.executable, PRETOOL],
-                           input=json.dumps(payload).encode(), capture_output=True,
-                           env=dict(os.environ, SHUNT_CONF=conf_dir))
+        payload = {"tool_name": "Bash", "session_id": sid, "tool_input": {"command": command}}
+        r = subprocess.run(
+            [sys.executable, PRETOOL],
+            input=json.dumps(payload).encode(),
+            capture_output=True,
+            env=dict(os.environ, SHUNT_CONF=conf_dir),
+        )
         out = r.stdout.decode().strip()
         if not out:
             return None
@@ -388,8 +385,7 @@ class TestHookUsesTheSameConfig(unittest.TestCase):
 
     def test_toml_host_is_rewritten_with_target_and_key(self):
         with TmpConf() as c:
-            c.write("shunt.toml",
-                    'key = "/keys/default"\n[hosts]\nh1 = "root@10.0.0.1"\n')
+            c.write("shunt.toml", 'key = "/keys/default"\n[hosts]\nh1 = "root@10.0.0.1"\n')
             with open(os.path.join(c.dir, "target.s1"), "w") as f:
                 f.write("h1")
             cmd = self._run_hook(c.dir, "ls -la")
@@ -412,7 +408,7 @@ class TestHookUsesTheSameConfig(unittest.TestCase):
                 f.write("h1")
             cmd = self._run_hook(c.dir, "rm -rf /var/log/*")
             self.assertIsNotNone(cmd)
-            self.assertNotIn("rm -rf", cmd)          # the dangerous command is gone
+            self.assertNotIn("rm -rf", cmd)  # the dangerous command is gone
             self.assertTrue(cmd.startswith("echo "))
             self.assertIn("cannot resolve @h1", cmd)
             self.assertIn("NOT run", cmd)
@@ -422,7 +418,7 @@ class TestHookUsesTheSameConfig(unittest.TestCase):
         with TmpConf() as c:
             c.write("shunt.toml", '[hosts]\nweb-02 = "root@10.0.0.2"\n')
             with open(os.path.join(c.dir, "target.s1"), "w") as f:
-                f.write("web-01")                    # renamed since the session switched
+                f.write("web-01")  # renamed since the session switched
             cmd = self._run_hook(c.dir, "ls -la")
             self.assertNotIn("ssh", cmd)
             self.assertIn("cannot resolve @web-01", cmd)

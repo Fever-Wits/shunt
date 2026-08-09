@@ -23,6 +23,7 @@ Both callers (cli.py, pretool.py) pass their own conf dir: the knowledge of the 
 lives here, the knowledge of the LOCATION stays with the caller (which is also what lets
 the tests point it at a temp dir).
 """
+
 import json
 import os
 import sys
@@ -32,7 +33,7 @@ import tomllib  # stdlib since Python 3.11
 TOML_NAME = "shunt.toml"
 LEGACY_NAME = "hosts"
 
-_legacy_notice_said = False     # the legacy notice is said ONCE per process
+_legacy_notice_said = False  # the legacy notice is said ONCE per process
 
 
 def config_path(conf_dir):
@@ -106,12 +107,12 @@ def add_host(conf_dir, alias, target, key=None):
     os.makedirs(conf_dir, exist_ok=True)
     path = os.path.join(conf_dir, TOML_NAME)
     if not os.path.exists(path):
-        line = _entry_line(alias, target, None)     # a fresh file: the key becomes the default
+        line = _entry_line(alias, target, None)  # a fresh file: the key becomes the default
         _write_atomic(path, _fresh_document(line, key))
         return line
 
     with open(path, "rb") as f:
-        default_key = tomllib.load(f).get("key")    # raises on a broken file → we do not clobber it
+        default_key = tomllib.load(f).get("key")  # raises on a broken file → we do not clobber it
     line = _entry_line(alias, target, key if key and key != default_key else None)
     with open(path) as f:
         lines = f.read().splitlines()
@@ -119,7 +120,7 @@ def add_host(conf_dir, alias, target, key=None):
     body = lines[start:end]
     for i, existing in enumerate(body):
         if _defines(existing, alias):
-            body[i] = line          # in place: the comment above it still describes it
+            body[i] = line  # in place: the comment above it still describes it
             break
     else:
         body.append(line)
@@ -130,9 +131,9 @@ def add_host(conf_dir, alias, target, key=None):
 
 # ── reading ───────────────────────────────────────────────────────────────────
 
+
 def _host(alias, target, key):
-    return {"alias": alias, "target": target,
-            "key": os.path.expanduser(key) if key else None}
+    return {"alias": alias, "target": target, "key": os.path.expanduser(key) if key else None}
 
 
 def _load_toml(path):
@@ -149,8 +150,8 @@ def _load_toml(path):
             target, key = None, None
         if not target:
             raise ValueError(
-                f'{path}: host "{alias}" must be "user@host" or '
-                '{ target = "user@host", key = "~/.ssh/id" }')
+                f'{path}: host "{alias}" must be "user@host" or {{ target = "user@host", key = "~/.ssh/id" }}'
+            )
         hosts[alias] = _host(alias, target, key)
     return hosts
 
@@ -192,14 +193,17 @@ def _say_legacy_once(conf_dir, legacy_path, dropped=0):
     sys.stderr.write(
         f"shunt: reading the legacy host list {legacy_path}\n"
         f"       the new place is {new_path} (see shunt.toml.example) — nothing is migrated\n"
-        "       automatically; the legacy file keeps working until you move it\n")
+        "       automatically; the legacy file keeps working until you move it\n"
+    )
     if dropped:
         sys.stderr.write(
             f"       {dropped} line(s) skipped: not in the `<alias> ssh <target>` form —\n"
-            "       shunt speaks ssh only\n")
+            "       shunt speaks ssh only\n"
+        )
 
 
 # ── writing ───────────────────────────────────────────────────────────────────
+
 
 def _write_atomic(path, text):
     """Put the file in place in ONE step: temp file in the SAME directory → os.replace.
@@ -221,15 +225,15 @@ def _write_atomic(path, text):
             f.flush()
             os.fsync(f.fileno())
         if os.path.exists(path):
-            os.chmod(tmp, os.stat(path).st_mode)    # the owner's permissions survive
-        os.replace(tmp, path)                       # atomic on POSIX, same filesystem
+            os.chmod(tmp, os.stat(path).st_mode)  # the owner's permissions survive
+        os.replace(tmp, path)  # atomic on POSIX, same filesystem
     except Exception:
         try:
             os.unlink(tmp)
         except OSError:
             pass
         raise
-    dfd = os.open(d, os.O_RDONLY)                   # the rename itself must reach the disk
+    dfd = os.open(d, os.O_RDONLY)  # the rename itself must reach the disk
     try:
         os.fsync(dfd)
     finally:

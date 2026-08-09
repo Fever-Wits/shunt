@@ -10,6 +10,9 @@ Two jobs, one file — because both need the same answer to "where is this sessi
            thing. Never blocked — remote-mode-plus-local-file is legitimate as often as
            it is a mistake; only the silence was the defect.
 
+A rewrite may carry a note along (the first command after a switch · something that
+cannot be taken back leaving for another machine) — said, never blocked, see emit().
+
 Switching: @<alias> / @local / @status — PER-SESSION (does not clash across parallel sessions).
 
 The transport is ssh + ControlMaster: zero open ports, zero shared token, encrypted.
@@ -22,6 +25,7 @@ we stay independent of undocumented env settings.
 CRITICAL: the rewritten command runs in a strict sandbox (root, no ~/.config/shunt, BUT network
 OK). That is why the client is the `ssh` binary, which is available in the sandbox.
 """
+
 import json  # `re` costs nothing extra — json loads it anyway
 import os
 import re
@@ -57,12 +61,18 @@ REWRITE_MARKER = "#shunt-rewritten\n"
 LOCAL_DISK_TOOLS = ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Grep", "Glob")
 
 
-def emit(command):
-    """Return a rewritten command to Claude Code and exit."""
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": "allow",
-        "updatedInput": {"command": command}}}))
+def emit(command, notice=None):
+    """Return a rewritten command to Claude Code and exit.
+
+    A `notice` rides in the SAME reply as the rewrite, deliberately not through warn():
+    warn() exits, and an exit before the rewrite would run the command HERE, on the very
+    machine the caller believes they left. Verified against the harness (2.1.225):
+    updatedInput and additionalContext are delivered together, rewrite intact.
+    """
+    out = {"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": {"command": command}}
+    if notice:
+        out["additionalContext"] = notice
+    print(json.dumps({"hookSpecificOutput": out}))
     sys.exit(0)
 
 
@@ -76,13 +86,11 @@ def warn(msg):
     Blocking would be wrong here: working remotely with local file tools is legitimate
     as often as it is a mistake. Only the SILENCE is the defect.
     """
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "additionalContext": msg}}))
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": msg}}))
     sys.exit(0)
 
 
-DAYS_PER_MONTH = 30     # `drop_months` is a human unit, not a calendar one — see _trim_audit
+DAYS_PER_MONTH = 30  # `drop_months` is a human unit, not a calendar one — see _trim_audit
 
 
 # ── one record = one line ──────────────────────────────────────────────────────
@@ -154,8 +162,7 @@ def audit(sid, alias, cmd, conf=None):
     path = os.path.join(conf, "audit.log")
     try:
         with open(path, "a") as f:
-            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} sid={sid} host={alias} "
-                    f":: {escape_cmd(cmd)}\n")
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} sid={sid} host={alias} :: {escape_cmd(cmd)}\n")
         cfg = config.audit_settings(conf)
         ceiling = int(cfg["trim_at_mb"] * 1_000_000)
         if os.path.getsize(path) > ceiling:
@@ -172,8 +179,7 @@ def _months_after(iso_date, months):
     more here than being exact.
     """
     t = time.strptime(iso_date, "%Y-%m-%d")
-    return time.strftime("%Y-%m-%d",
-                         time.localtime(time.mktime(t) + months * DAYS_PER_MONTH * 86400))
+    return time.strftime("%Y-%m-%d", time.localtime(time.mktime(t) + months * DAYS_PER_MONTH * 86400))
 
 
 def _cut_date(oldest_line, drop_months):
@@ -193,7 +199,7 @@ def _cut_date(oldest_line, drop_months):
         return None
 
 
-RECORD_HEAD = re.compile(r"\d{4}-\d{2}-\d{2}T")   # exactly how audit() opens every line
+RECORD_HEAD = re.compile(r"\d{4}-\d{2}-\d{2}T")  # exactly how audit() opens every line
 
 
 def _has_date(line):
@@ -227,7 +233,7 @@ def log_records(lines):
     records = []
     for line in lines:
         if records and not _has_date(line):
-            records[-1] += line          # inherited spill-over: rare, and records are short
+            records[-1] += line  # inherited spill-over: rare, and records are short
         else:
             records.append(line)
     return records
@@ -273,7 +279,7 @@ def _trim_audit(path, drop_months, ceiling):
         return
 
     records = log_records(lines)
-    cutoff = _cut_date(lines[0], drop_months)            # oldest line dates the cut
+    cutoff = _cut_date(lines[0], drop_months)  # oldest line dates the cut
     if cutoff is None:
         # The oldest line has no readable date, so age cannot address anything. Size
         # below still can — and it drops from the front, so the damaged line is the
@@ -291,7 +297,7 @@ def _trim_audit(path, drop_months, ceiling):
         kept = records
 
     total = sum(len(rec) for rec in kept)
-    if total > ceiling:                     # last resort: the history itself is the flood
+    if total > ceiling:  # last resort: the history itself is the flood
         start, acc = len(kept), 0
         while start > 0 and acc + len(kept[start - 1]) <= ceiling:
             start -= 1
@@ -330,10 +336,33 @@ def read_target(sid):
         with open(os.path.join(CONF, "target." + sid)) as f:
             alias = f.read().strip()
     except FileNotFoundError:
-        return ""                       # never switched — the ordinary local session
+        return ""  # never switched — the ordinary local session
     except Exception:
-        return BROKEN_TARGET            # it IS there; we cannot say where it points
+        return BROKEN_TARGET  # it IS there; we cannot say where it points
     return alias or BROKEN_TARGET
+
+
+def _clear_routing(path):
+    """Take the routing file away — "" when it is gone, the REASON when it is not.
+
+    A directory in that place is not the exotic case, it is the trapping one: it reads as
+    the unreadable state, so every bash command is refused — and `@local`, the one remedy
+    for that state, could not win either, because os.remove can never take a directory.
+    A refusal whose only way out cannot run leaves a session with no way out from inside.
+    rmdir takes an empty one; a full one is reported WITH its path, to be removed by hand.
+    """
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return ""  # already local — nothing to remove
+    except IsADirectoryError:
+        try:
+            os.rmdir(path)
+        except OSError as e:
+            return e.strerror or str(e)
+    except OSError as e:
+        return e.strerror or str(e)
+    return ""
 
 
 def _warned_before(sid, alias):
@@ -378,30 +407,38 @@ def warn_if_off_mode(tool, sid):
             # one Grep would spend it and the next agent would be born into silence. What
             # it inherits is worse than a wrong disk, too: while the routing is unreadable
             # main() refuses every bash command, so the agent works with no bash at all.
-            warn("⚠ shunt: this session's routing state is unreadable — whether you are "
-                 "local or on a host cannot be said, and a spawned agent INHERITS that "
-                 "state: its bash commands are REFUSED until the routing is settled, and "
-                 "its file tools read the LOCAL disk meanwhile. `@status` to look, then "
-                 "`@local` or `@<alias>` to settle it.")
+            warn(
+                "⚠ shunt: this session's routing state is unreadable — whether you are "
+                "local or on a host cannot be said, and a spawned agent INHERITS that "
+                "state: its bash commands are REFUSED until the routing is settled, and "
+                "its file tools read the LOCAL disk meanwhile. `@status` to look, then "
+                "`@local` or `@<alias>` to settle it."
+            )
         if not _warned_before(sid, "?"):
-            warn("⚠ shunt: this session's routing state is unreadable — whether you are "
-                 f"local or on a host cannot be said. {tool} works on the LOCAL disk either "
-                 "way. `@status` to look, then `@local` or `@<alias>` to settle it. "
-                 "(said once)")
+            warn(
+                "⚠ shunt: this session's routing state is unreadable — whether you are "
+                f"local or on a host cannot be said. {tool} works on the LOCAL disk either "
+                "way. `@status` to look, then `@local` or `@<alias>` to settle it. "
+                "(said once)"
+            )
         return
     if not alias:
-        return                                  # local — nothing to warn about
+        return  # local — nothing to warn about
     if tool == "Agent":
         # Every spawn matters: the agent inherits the mode and reads missing local
         # files as facts about the world. Observed once as "the Bash tool briefly
         # lost access to the working directory" — it had not; it was elsewhere.
-        warn(f"⚠ shunt: you are on @{alias} — a spawned agent INHERITS this and will run "
-             "its bash there, reading absent local files as facts. Switch with "
-             f"`@local` first, or make sure the agent is meant to work on {alias}.")
+        warn(
+            f"⚠ shunt: you are on @{alias} — a spawned agent INHERITS this and will run "
+            "its bash there, reading absent local files as facts. Switch with "
+            f"`@local` first, or make sure the agent is meant to work on {alias}."
+        )
     if tool in LOCAL_DISK_TOOLS and not _warned_before(sid, alias):
-        warn(f"⚠ shunt: you are on @{alias}, but {tool} works on the LOCAL disk — the mode covers "
-             f"bash only. Remote file → `shunt read/edit @{alias} …`; remote search → "
-             f"`shunt run @{alias} \"grep -rn PATTERN /path\"`. (said once per host)")
+        warn(
+            f"⚠ shunt: you are on @{alias}, but {tool} works on the LOCAL disk — the mode covers "
+            f"bash only. Remote file → `shunt read/edit @{alias} …`; remote search → "
+            f'`shunt run @{alias} "grep -rn PATTERN /path"`. (said once per host)'
+        )
 
 
 # ── the one line that must NOT be redirected ──────────────────────────────────
@@ -441,29 +478,130 @@ def _shunt_cli_here_or_refuse(s, sid):
     """
     hit = SHELL_BREAK.search(s)
     if not hit:
-        sys.exit(0)                  # one shunt command, one machine — as it always was
+        sys.exit(0)  # one shunt command, one machine — as it always was
     alias = read_target(sid)
     if alias == "":
-        sys.exit(0)                  # local session — there is no other machine in play
-    where = (f"on @{alias}" if alias is not BROKEN_TARGET
-             else "routed somewhere this hook cannot read")
+        sys.exit(0)  # local session — there is no other machine in play
+    where = f"on @{alias}" if alias is not BROKEN_TARGET else "routed somewhere this hook cannot read"
     # Named out here rather than inside the message: a `\n` may not appear in an f-string
     # expression before python 3.12, and this file still runs on 3.11.
     seen = "newline" if hit.group(0) == "\n" else hit.group(0)
-    echo("[shunt] NOT run. `shunt …` runs on THIS machine — and so would the rest of this "
-         f"line, everything past the `{seen}`, while the session is {where}. Send the "
-         "`shunt …` part as its own command (it runs here in any mode) and the rest as "
-         "another; or `@local` first, if the whole line was meant for this machine.")
+    echo(
+        "[shunt] NOT run. `shunt …` runs on THIS machine — and so would the rest of this "
+        f"line, everything past the `{seen}`, while the session is {where}. Send the "
+        "`shunt …` part as its own command (it runs here in any mode) and the rest as "
+        "another; or `@local` first, if the whole line was meant for this machine."
+    )
+
+
+# ── what is said before a command leaves for another machine ──────────────────
+# Two NARROW cases, never one wide one. A line that is always there stops being read,
+# and a check nobody reads is worse than no check: the warning that matters drowns in
+# the ones that did not. Both ride along with the rewrite (emit's `notice`) — see emit().
+
+# Commands that cannot be taken back on the far side, by themselves, with no flag needed.
+# The list is deliberately SHORT: a missed warning costs less than a warning on every
+# `ls`, so anything that only SOMETIMES destroys is either shaped below or left out.
+IRREVERSIBLE = {
+    "rm",
+    "rmdir",
+    "mv",
+    "dd",
+    "shred",
+    "truncate",
+    "mkfs",
+    "wipefs",
+    "reboot",
+    "poweroff",
+    "halt",
+    "shutdown",
+}
+
+# Ordinary commands that turn irreversible in ONE shape. The flag or subcommand is what
+# does it, so the bare command stays silent — `git status`, `docker ps`, `chmod 644`,
+# `find -name` are the daily work and must not speak.
+IRREVERSIBLE_WITH = {
+    "chown": ("-R", "--recursive"),
+    "chmod": ("-R", "--recursive"),
+    "find": ("-delete",),
+    "git": ("clean", "--hard"),
+    "docker": ("rm", "rmi", "prune"),
+}
+
+# Where a new command can begin: a shell separator, or `-exec`, which exists to introduce
+# one (`find … -exec rm {} \;`). Splitting the RAW text means a separator inside quotes
+# opens a phantom segment — that can only ADD a warning, never hide one, which is the
+# right direction for something that never blocks.
+COMMAND_BREAK = re.compile(r"[\n;&|(){}`]+|\$\(|\s-exec(?:dir)?\s")
+
+# Words that stand in FRONT of the real command without being it.
+NOT_THE_COMMAND = ("sudo", "doas", "env", "time", "nohup", "xargs", "command", "then", "else", "do")
+ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z_0-9]*=")
+
+# A lone `>` truncates whatever it points at. `>>` appends, `2>&1` and `>&2` only move a
+# stream, and `->` inside a word (`--pretty=%h -> %s`) is not a redirect at all.
+# `/dev/null` is a lone `>` and is excluded anyway: there is nothing there to lose. Not
+# politeness — `2>/dev/null` is the commonest shape in an agent's bash, our own remote
+# script carries one, and without this the loudest line the hook has rode along with
+# ordinary commands. That is the wallpaper the two-narrow-cases rule above IRREVERSIBLE
+# exists to prevent. The word boundary keeps `> /dev/nullish` — somebody's real file —
+# on the loud side.
+OVERWRITE = re.compile(r"(?<![->])>(?![>&])(?!\s*/dev/null\b)")
+OVERWRITE_NAME = "> (truncates its target)"
+
+
+def _command_of(words):
+    """The name of the command a segment runs — "" when it runs none.
+
+    A leading `sudo`, a shell keyword, an option or a VAR=value is stepped over, and a
+    path is reduced to its last part, so /bin/rm is still rm.
+    """
+    for word in words:
+        if word in NOT_THE_COMMAND or word.startswith("-") or ASSIGNMENT.match(word):
+            continue
+        return os.path.basename(word).strip("'\"")
+    return ""
+
+
+def irreversible_in(cmd):
+    """The irreversible actions in `cmd`, named as a reader would name them.
+
+    Command POSITION, not substring: `alarm`, `--format` and `grep rm` merely CONTAIN a
+    command name, and a hook that fires on those teaches the reader to skip its lines.
+    """
+    found = []
+    for segment in COMMAND_BREAK.split(cmd):
+        words = segment.split()
+        name = _command_of(words)
+        shapes = [flag for flag in IRREVERSIBLE_WITH.get(name, ()) if flag in words]
+        if name in IRREVERSIBLE or name.startswith("mkfs."):  # mkfs.ext4, mkfs.xfs, …
+            hit = name
+        elif shapes:
+            # the PAIR that spotted it, rather than a command line nobody typed:
+            # `git reset --hard` is seen as `git` + `--hard`
+            hit = f"{name} … {shapes[0]}"
+        else:
+            continue
+        if hit not in found:
+            found.append(hit)
+    if OVERWRITE.search(cmd):
+        found.append(OVERWRITE_NAME)
+    return found
 
 
 def _just_switched(sid, alias):
     """True on the FIRST command after `@alias`, and only that one.
 
-    Remembered in a file beside the session's other markers, the same shape as
-    _warned_before: the switch arms it, the first command spends it. That one command is
-    where the far side's housekeeping is paid — see _remote_script. Doing it on every
-    command would mean a `find` over someone's disk, several times a minute, to delete
-    nothing, and a line of output where silence is the contract.
+    Remembered in a file next to the session's other state, the same shape as
+    _warned_before: the switch arms the marker, the first command spends it. TWO riders
+    sit on that one fact — the reminder (remote_notice) and the far side's housekeeping
+    (_remote_script) — which is why it is read in exactly one place; the other half of
+    that is in remote_notice.
+
+    Once and not per command, for both of them: a repeated line would be wallpaper — and
+    wallpaper is silent exactly when it needs to speak — and a repeated sweep would be a
+    `find` over someone's disk, several times a minute, to delete nothing. The case the
+    reminder exists for is "I forgot I had switched", which lives in that one command too.
     """
     path = os.path.join(CONF, "switched." + sid)
     try:
@@ -474,8 +612,33 @@ def _just_switched(sid, alias):
     try:
         os.remove(path)
     except OSError:
-        pass            # best-effort: a repeated sweep beats a crash
+        pass  # best-effort: a repeated reminder beats a crash
     return fresh
+
+
+def remote_notice(sid, alias, cmd, switched):
+    """What to say before this command leaves for @alias — "" when there is nothing.
+
+    `switched` is handed IN rather than asked here: the same one-shot fact also decides
+    what the remote script does with that command (its housekeeping rides on it), and the
+    marker can only be spent once — whoever asked first would silently starve the other.
+
+    ⚠ `cmd` is the command as the CALLER typed it, never the rewritten one. The rewrite
+    carries our own `find … -delete` on a switch, which irreversible_in() would report as
+    the caller's doing — a warning about a command nobody wrote teaches the reader to skip
+    the ones that matter.
+    """
+    lines = []
+    if switched:
+        lines.append(f"ℹ shunt: first command since `@{alias}` — it runs THERE, not here. (said once per switch)")
+    hits = irreversible_in(cmd)
+    if hits:
+        lines.append(
+            f"⚠ shunt: you are on @{alias} — this runs THERE and cannot be taken "
+            f"back: {', '.join(hits)}. Check which machine you meant; `@local` "
+            "first if it is this one."
+        )
+    return "\n".join(lines)
 
 
 def resolve_host(alias):
@@ -554,13 +717,37 @@ def _remote_script(cmd, sid, switched=False):
     ⊸ the price, said plainly: a home that becomes unwritable MID-session is not reported
       until the next switch. Nothing here can see the far side between commands — the hook
       builds the command, it never sees what came back.
+
+    The restore SPEAKS when it cannot land. `cd X || cd ~` is the textbook shape of a cd
+    whose failure nobody looks at, and on the next line an arbitrary command: the caller's
+    own, which assumes it is where it left off. A directory removed on the far side
+    between two commands would silently move `rm -rf ./*` from /srv/old-release to $HOME.
+    It is said and not refused — the session must stay usable when its remembered
+    directory is swept — and it fires ONLY on a real failure: with no state file yet the
+    cd goes to $HOME and succeeds, so the ordinary first command after a switch says
+    nothing.
+    ⚠ The message says CANNOT BE ENTERED, not "is gone": cd fails just as readily on a
+      directory that still exists — permissions changed, a mount that fell away — and a
+      message that names the wrong cause sends the reader looking in the wrong place.
+      What is verified here is the cd's failure; the reason is not.
     """
-    lines = [f'cd "$(cat {_state_file(sid)} 2>/dev/null || echo "$HOME")" 2>/dev/null || cd ~']
+    # The path goes through a variable so the message can NAME it — a report that cannot
+    # say which directory it is leaves the reader to guess. Unset right after, because
+    # what follows is the caller's shell and it is not ours to leave things in.
+    lines = [
+        f'__shunt_cwd="$(cat {_state_file(sid)} 2>/dev/null || echo "$HOME")"',
+        'cd "$__shunt_cwd" 2>/dev/null || { echo "shunt: $__shunt_cwd"'
+        ' "cannot be entered (gone or not accessible); running in $HOME instead"'
+        " >&2; cd ~; }",
+        "unset __shunt_cwd",
+    ]
     if switched:
         lines.append(REMOTE_STATE_TRIM)
-        lines.append(f'{_state_write(sid)} || echo "shunt: cannot write" {REMOTE_STATE_DIR} '
-                     f'"- this session will not remember its working directory '
-                     f'(every command starts at $HOME)" >&2')
+        lines.append(
+            f'{_state_write(sid)} || echo "shunt: cannot write" {REMOTE_STATE_DIR} '
+            f'"- this session will not remember its working directory '
+            f'(every command starts at $HOME)" >&2'
+        )
     # trap EXIT captures the code + updates cwd on EVERY exit (incl. `exit N` in the
     # command). `rc` is taken first and spent last, so no bookkeeping in here can change
     # what the caller's command returned.
@@ -592,15 +779,29 @@ def ssh_command(host, cmd, sid, switched=False):
     # USER: two aliases onto one machine with different accounts (the config allows it)
     # would otherwise ride the first one's master and run as the wrong account.
     remote = _remote_script(cmd, sid, switched)
-    opts = ["-o", "StrictHostKeyChecking=accept-new",
-            "-o", "ControlMaster=auto", "-o", "ControlPath=" + sock,
-            "-o", "ControlPersist=300", "-o", "BatchMode=yes"]
+    opts = [
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "ControlMaster=auto",
+        "-o",
+        "ControlPath=" + sock,
+        "-o",
+        "ControlPersist=300",
+        "-o",
+        "BatchMode=yes",
+    ]
     if key:
         opts = ["-i", key] + opts
-    return (REWRITE_MARKER
-            + "ssh " + " ".join(shlex.quote(o) for o in opts)
-            + " " + shlex.quote(host["target"])
-            + " " + shlex.quote(remote))
+    return (
+        REWRITE_MARKER
+        + "ssh "
+        + " ".join(shlex.quote(o) for o in opts)
+        + " "
+        + shlex.quote(host["target"])
+        + " "
+        + shlex.quote(remote)
+    )
 
 
 def main():
@@ -615,9 +816,9 @@ def main():
     # @host mode, so they get a warning instead of nothing.
     if tool != "Bash":
         try:
-            warn_if_off_mode(tool, sid)   # exits via warn() when it has something to say
+            warn_if_off_mode(tool, sid)  # exits via warn() when it has something to say
         except Exception:
-            pass                          # fail-open: never break someone else's tool
+            pass  # fail-open: never break someone else's tool
         sys.exit(0)
 
     target_file = os.path.join(CONF, "target." + sid)
@@ -632,14 +833,33 @@ def main():
     # shunt CLI commands run LOCALLY (they do the transport themselves) → do not redirect.
     # Only as far as the line IS one command, though — see _shunt_cli_here_or_refuse.
     if s == "shunt" or s.startswith("shunt "):
-        _shunt_cli_here_or_refuse(s, sid)     # never returns: runs here, or says why not
+        _shunt_cli_here_or_refuse(s, sid)  # never returns: runs here, or says why not
 
     # --- switches ---
     if s == "@local":
-        try:
-            os.remove(target_file)
-        except OSError:
-            pass
+        alias_before = read_target(sid)  # named in the failure message below, if any
+        failed = _clear_routing(target_file)
+        if failed and alias_before is BROKEN_TARGET:
+            # Two failures at once, and neither may be dressed as the other: the routing
+            # is UNREADABLE, so nothing here can say the session is remote — bash is not
+            # sent anywhere, it is refused. Naming a machine would be the very claim the
+            # unreadable state forbids: the hook never states what it has not verified.
+            # echo() exits.
+            echo(
+                "[shunt] @local FAILED — the routing state is unreadable AND could not "
+                f"be cleared ({failed}). No machine can be named and none is being used: "
+                f"bash stays REFUSED until {target_file} is removed by hand."
+            )
+        if failed:
+            # The one place this hook may actively LIE: saying LOCAL while still
+            # routed remote sends the next command — and an operator's own hands —
+            # to the far machine believing it is here. Say the truth instead and
+            # stop; the routing file is untouched, so the session IS still remote.
+            echo(
+                f"[shunt] @local FAILED — could not leave @{alias_before} ({failed}). "
+                "Session is STILL REMOTE; the next command still runs THERE, not here. "
+                "Fix it and retry `@local`."
+            )
         # best-effort: remove active-host sidecar for this session
         try:
             os.remove(os.path.join(CONF, "active-host." + sid))
@@ -650,7 +870,8 @@ def main():
             os.remove(os.path.join(CONF, "warned." + sid))
         except OSError:
             pass
-        # and the armed switch-marker: there is no far machine left to keep house on
+        # and the armed switch-marker: there is no far machine left to point at, or to
+        # keep house on
         try:
             os.remove(os.path.join(CONF, "switched." + sid))
         except OSError:
@@ -662,8 +883,10 @@ def main():
         if t is BROKEN_TARGET:
             # "LOCAL" here would be the one answer the caller acts on and the one the
             # hook has not verified. echo() exits.
-            echo(f"[shunt] UNKNOWN — {target_file} is there but names no host. `@local` to "
-                 "be local on purpose, or `@<alias>` to route again.")
+            echo(
+                f"[shunt] UNKNOWN — {target_file} is there but names no host. `@local` to "
+                "be local on purpose, or `@<alias>` to route again."
+            )
         echo("[shunt] " + (("REMOTE → " + t) if t else "LOCAL"))
         sys.exit(0)
     elif s.startswith("@") and len(s) > 1 and " " not in s:
@@ -672,9 +895,17 @@ def main():
         if not host:
             echo("[shunt] unknown host: " + alias)
             sys.exit(0)
-        os.makedirs(CONF, exist_ok=True)
-        before = read_target(sid)       # what still stands if the write does not land
+        before = read_target(sid)  # what still stands if the write does not land
         try:
+            # The directory is made INSIDE the guard, with the write it exists for. Its
+            # failure is the same event as the write's — the switch does not happen — and
+            # outside the guard it was not an event at all but a traceback: a hook that
+            # raises is a non-blocking error to the harness, which then runs the ORIGINAL
+            # line, so `@web-01` went to bash while nobody said the switch had not
+            # happened. Narrow on purpose to name: resolve_host() above has just read
+            # CONF/shunt.toml, so the directory IS there — this closes the window between
+            # the two calls (a parallel session's cleanup, a tmp reaper), not an open path.
+            os.makedirs(CONF, exist_ok=True)
             # Through the config module's own atomic writer, because open(…, "w")
             # TRUNCATES first: a write dying in between leaves a file that exists and
             # names no host — the state read_target used to hand back as "local". A
@@ -689,19 +920,26 @@ def main():
             # open(…, "w") needed only the file, so a config dir nobody can write to now
             # fails every switch. echo() exits: no marker is armed, nothing is announced,
             # and the previous routing is untouched.
-            stands = ("routed somewhere this hook cannot read" if before is BROKEN_TARGET
-                      else f"on @{before}" if before else "LOCAL")
+            stands = (
+                "routed somewhere this hook cannot read"
+                if before is BROKEN_TARGET
+                else f"on @{before}"
+                if before
+                else "LOCAL"
+            )
             reason = getattr(e, "strerror", None) or e
-            echo(f"[shunt] switch to @{alias} FAILED — could not write {target_file} "
-                 f"({reason}). Nothing changed; the session is STILL {stands}. "
-                 f"Fix that and try `@{alias}` again.")
-        # arm the one-shot marker: the command AFTER a switch is the one that pays for
-        # the far side's housekeeping — see _remote_script
+            echo(
+                f"[shunt] switch to @{alias} FAILED — could not write {target_file} "
+                f"({reason}). Nothing changed; the session is STILL {stands}. "
+                f"Fix that and try `@{alias}` again."
+            )
+        # arm the one-shot marker: the command AFTER a switch is the one that forgets it,
+        # and the one that pays for the far side's housekeeping — see _remote_script
         try:
             with open(os.path.join(CONF, "switched." + sid), "w") as f:
                 f.write(alias)
         except Exception:
-            pass                        # a missing marker may not cost the switch
+            pass  # a missing marker may not cost the switch
         echo(f"[shunt] mode: REMOTE → {alias} ({host['target']})")
         sys.exit(0)
 
@@ -711,9 +949,11 @@ def main():
         # The same shape as the unresolvable alias below, for the same reason: the one
         # thing that may not happen is this command running HERE while nobody can say
         # whether the session was routed away. Say it, run nothing. echo() exits.
-        echo(f"[shunt] {target_file} is there but names no host — command NOT run (it "
-             "would have run LOCALLY, and this session may be routed away from here). "
-             "`@local` to be local on purpose, or `@<alias>` to route again.")
+        echo(
+            f"[shunt] {target_file} is there but names no host — command NOT run (it "
+            "would have run LOCALLY, and this session may be routed away from here). "
+            "`@local` to be local on purpose, or `@<alias>` to route again."
+        )
     if alias:
         host = resolve_host(alias)
         if not host:
@@ -723,9 +963,11 @@ def main():
             # REMOTE: `rm -rf /var/log/*` meant for a server deletes the local one.
             # Refusing is not the same as a traceback in front of every command — the
             # third option is the one @unknown already uses: say it, run nothing.
-            echo(f"[shunt] cannot resolve @{alias} — command NOT run (it would have run "
-                 f"LOCALLY). Check `shunt hosts`, then `@{alias}` again or `@local`.")
-            sys.exit(0)                # echo() already exits; said out loud, as above
+            echo(
+                f"[shunt] cannot resolve @{alias} — command NOT run (it would have run "
+                f"LOCALLY). Check `shunt hosts`, then `@{alias}` again or `@local`."
+            )
+            sys.exit(0)  # echo() already exits; said out loud, as above
         # sidecar: record active routing target + append to audit log (fire-and-forget)
         try:
             with open(os.path.join(CONF, "active-host." + sid), "w") as f:
@@ -733,9 +975,17 @@ def main():
         except Exception:
             pass
         audit(sid, alias, cmd)
-        # spent here and nowhere else: _just_switched removes the marker it reads, so the
-        # housekeeping inside the script rides on the first command after a switch only
-        emit(ssh_command(host, cmd, sid, _just_switched(sid, alias)))
+        try:
+            # ONE question, two riders: the note below and the once-per-switch
+            # housekeeping inside the script. Asked HERE because the answer is spent —
+            # _just_switched removes the marker it reads.
+            switched = _just_switched(sid, alias)
+            notice = remote_notice(sid, alias, cmd, switched)
+        except Exception:
+            # fail-quiet: neither a note nor a sweep may cost the command its rewrite —
+            # an unrewritten command runs HERE, on the machine the caller believes they left
+            switched, notice = False, ""
+        emit(ssh_command(host, cmd, sid, switched), notice)
 
     sys.exit(0)
 

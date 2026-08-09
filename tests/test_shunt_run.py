@@ -12,6 +12,7 @@ Coverage:
 ssh is stubbed everywhere — no connection is attempted. SHUNT_CONF points at a
 temp dir with two fake hosts.
 """
+
 import os
 import shutil
 import sys
@@ -25,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import shunt.cli as shunt_mod
 
 # ── helpers ────────────────────────────────────────────────────────────────────
+
 
 class TmpHosts:
     """Context manager: temp CONF holding one host in shunt.toml.
@@ -60,6 +62,7 @@ def run_with_stubbed_ssh(argv, returncode=0):
 
 # ── registration ───────────────────────────────────────────────────────────────
 
+
 class TestRegistered(unittest.TestCase):
     """A subcommand nobody can reach by name does not exist."""
 
@@ -73,15 +76,14 @@ class TestRegistered(unittest.TestCase):
         """Adding one must not drop another."""
         with open(shunt_mod.__file__) as f:
             src = f.read()
-        for name in ("hosts", "run", "read", "edit", "cp", "bg", "get",
-                     "log", "install", "checkout", "commit"):
+        for name in ("hosts", "run", "read", "edit", "cp", "bg", "get", "log", "install", "checkout", "commit"):
             self.assertIn(f'"{name}": cmd_', src)
 
 
 # ── quoting: the whole reason this is not a one-liner ──────────────────────────
 
-class TestQuoting(unittest.TestCase):
 
+class TestQuoting(unittest.TestCase):
     def test_single_argument_passes_verbatim(self):
         """`shunt run @h "ls | wc -l"` must keep its pipe, not escape it."""
         with TmpHosts():
@@ -102,8 +104,8 @@ class TestQuoting(unittest.TestCase):
 
 # ── exit code and errors ───────────────────────────────────────────────────────
 
-class TestExitCode(unittest.TestCase):
 
+class TestExitCode(unittest.TestCase):
     def test_remote_exit_code_passes_through(self):
         """Swallowing the code would make failure look like success."""
         with TmpHosts():
@@ -117,7 +119,6 @@ class TestExitCode(unittest.TestCase):
 
 
 class TestErrors(unittest.TestCase):
-
     def test_missing_command_is_usage_error(self):
         with TmpHosts(), self.assertRaises(SystemExit):
             shunt_mod.cmd_run(["@h1"])

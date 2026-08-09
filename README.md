@@ -124,8 +124,21 @@ each routed command to `~/.config/shunt/audit.log`.
 `shunt ...` commands themselves always run locally — the CLI does its own
 transport, so it is never redirected.
 
-Two behaviours worth knowing before you rely on the transparency:
+Three behaviours worth knowing before you rely on the transparency:
 
+- **A command that cannot be taken back is announced first.** While the session is on a
+  host, a line running `rm`, `mv`, `dd`, `shred`, `mkfs*`, `shutdown`, a recursive
+  `chown -R` / `chmod -R`, a `find … -delete`, a `git clean` / `git … --hard`, a
+  `docker rm` / `rmi` / `prune`, or a `>` that truncates a file arrives with the machine
+  named in front of it:
+
+  ```
+  ⚠ shunt: you are on @web-01 — this runs THERE and cannot be taken back: git … --hard,
+  docker … rm. Check which machine you meant; `@local` first if it is this one.
+  ```
+
+  It **warns and runs** — nothing is blocked and no exit code changes — and it speaks
+  every time, not once per session.
 - **An interrupted command is not killed on the far side.** No pty is allocated, so
   nothing sends the remote process SIGHUP — it keeps running there until it finishes on
   its own. Allocating one (`ssh -tt`) was measured and rejected: it hangs every pager and
@@ -201,6 +214,14 @@ Quoting: a **single** argument is handed over verbatim, so pipes, redirects and 
 survive; **several** arguments are re-quoted, so `shunt run @web-01 echo "a b"` stays two
 words on the far side.
 
+**While the session is remote, a `shunt …` line may not carry a `;`, `&`, `|`, a
+backtick, `$`, `(` or a newline.** Everything past the separator would run *here*, on the
+machine you believe you left, so the hook runs nothing and says why — the quoted pipe
+above is ordinary work in a local session and refused in a remote one. Send the
+`shunt …` part as its own command (it runs here in any mode) and the rest as another, or
+`@local` first if the whole line was meant for this machine. A form without those
+characters — `shunt run @web-01 "grep -rn PATTERN /path"` — works in either mode.
+
 This is also the explicit path for an agent that must work on another machine — better
 than leaving the session in remote mode and letting the agent inherit it silently (see
 [Where the mode stops](#where-the-mode-stops)).
@@ -226,7 +247,8 @@ otherwise the edit is refused. The edit is verified after write (SHA-256) and wr
 atomically. It is applied to the **raw bytes**: only the matched region is rewritten, so
 line endings elsewhere in the file and bytes that are not valid UTF-8 come back exactly
 as they were. The exit code follows the answer — **0 only when the file was changed** —
-so `shunt edit … && deploy` is safe to write.
+so `shunt edit … && deploy` is safe to write — as its own line, though: a `shunt …` line
+carrying `&&` is refused while the session is remote (see under `shunt run` above).
 
 ```bash
 $ shunt edit @web-01 /opt/app/config.ini "debug = false" "debug = true"

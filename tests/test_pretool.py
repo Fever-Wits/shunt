@@ -42,9 +42,7 @@ class _PretoolBase(unittest.TestCase):
 
 class TestResolveHost(_PretoolBase):
     HOSTS_CONTENT = (
-        "# comment line\n"
-        "host-a ssh   user@203.0.113.84 key=~/.ssh/id_ed25519\n"
-        "raspi  ssh   pi@203.0.113.99\n"
+        "# comment line\nhost-a ssh   user@203.0.113.84 key=~/.ssh/id_ed25519\nraspi  ssh   pi@203.0.113.99\n"
     )
 
     def test_known_host_with_key(self):

@@ -10,6 +10,8 @@ Coverage:
     the budget is shared: Grep is called often enough to turn a per-call line into
     wallpaper
   - switching host re-arms the file-tool warning
+  - the irreversible warning does not fire on a redirect to /dev/null, and still does
+    on a redirect to a file — the idiom must not turn the line into wallpaper
   - @local clears it, so entering remote mode again warns again
   - nothing is warned about while local
   - unknown tools are ignored
@@ -23,6 +25,7 @@ the hook is started BY PATH, and PYTHONPATH is stripped, because settings.json w
 in by absolute path and nothing puts the package on sys.path for it. SHUNT_CONF points
 at a temp dir, so no real config is read or written.
 """
+
 import json
 import os
 import subprocess
@@ -40,6 +43,7 @@ PRETOOL = pretool_mod.__file__
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
+
 
 class TmpConf:
     """Context manager: a temp SHUNT_CONF with two ssh hosts in shunt.toml.
@@ -60,6 +64,7 @@ class TmpConf:
 
     def __exit__(self, *_):
         import shutil
+
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def route_to(self, alias, sid="s1"):
@@ -88,12 +93,10 @@ def hook_env(conf_dir=None):
 
 def run_hook(conf, tool, tool_input=None, sid="s1"):
     """Run pretool.py exactly as the harness does. Returns (exit_code, stdout)."""
-    payload = {"tool_name": tool, "session_id": sid,
-               "tool_input": tool_input or {}}
-    r = subprocess.run([sys.executable, PRETOOL],
-                       input=json.dumps(payload).encode(),
-                       capture_output=True,
-                       env=hook_env(conf.dir))
+    payload = {"tool_name": tool, "session_id": sid, "tool_input": tool_input or {}}
+    r = subprocess.run(
+        [sys.executable, PRETOOL], input=json.dumps(payload).encode(), capture_output=True, env=hook_env(conf.dir)
+    )
     return r.returncode, r.stdout.decode()
 
 
@@ -118,6 +121,7 @@ def rewritten_command(stdout):
 
 
 # ── regression: the Bash path must be untouched ────────────────────────────────
+
 
 class TestBashUnchanged(unittest.TestCase):
     """The warning branch sits in FRONT of the Bash path — prove it stays out of it."""
@@ -159,8 +163,8 @@ class TestBashUnchanged(unittest.TestCase):
 
 # ── the agent warning (problem 1: silent inheritance) ──────────────────────────
 
-class TestAgentWarning(unittest.TestCase):
 
+class TestAgentWarning(unittest.TestCase):
     def test_agent_warned_in_remote_mode(self):
         with TmpConf() as c:
             c.route_to("h1")
@@ -187,8 +191,8 @@ class TestAgentWarning(unittest.TestCase):
 
 # ── the file-tool warning (problem 3: mode covers bash only) ───────────────────
 
-class TestFileToolWarning(unittest.TestCase):
 
+class TestFileToolWarning(unittest.TestCase):
     def test_read_warned_in_remote_mode(self):
         with TmpConf() as c:
             c.route_to("h1")
@@ -200,8 +204,7 @@ class TestFileToolWarning(unittest.TestCase):
 
     def test_all_local_disk_tools_covered(self):
         """Spelled out, not read from the tuple: a name dropped from it must fail here."""
-        for tool in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit",
-                     "Grep", "Glob"):
+        for tool in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Grep", "Glob"):
             with TmpConf() as c:
                 c.route_to("h1")
                 _, out = run_hook(c, tool, {"file_path": "/x"})
@@ -215,7 +218,7 @@ class TestFileToolWarning(unittest.TestCase):
             ctx = context_of(out)
             self.assertIsNotNone(ctx)
             self.assertIn("LOCAL disk", ctx)
-            self.assertIn("shunt run", ctx)          # the remedy for a remote search
+            self.assertIn("shunt run", ctx)  # the remedy for a remote search
 
     def test_search_and_file_tools_share_one_warning_per_host(self):
         """A line per Grep call would become wallpaper — and wallpaper is never read."""
@@ -280,10 +283,77 @@ class TestFileToolWarning(unittest.TestCase):
             self.assertIsNotNone(context_of(out))
 
 
+# ── the irreversible warning: the idiom vs the real thing ──────────────────────
+
+
+class TestARedirectToDevNullIsNotDestruction(unittest.TestCase):
+    """`2>/dev/null` throws a message away; it truncates nothing.
+
+    The `>`-detector used to fire on it — and that redirect is the commonest shape in an
+    agent's bash, carried by the hook's own remote script too. So the loudest line the
+    hook has ("cannot be taken back") arrived on ordinary commands, which is exactly the
+    wallpaper the two-narrow-cases rule above IRREVERSIBLE exists to prevent: a line that
+    is always there stops being read, and the warning that matters drowns with it.
+
+    Both directions are here on purpose. Silencing the idiom is worth nothing if it also
+    silences `> file`, and the tests that prove the silence would then pass on a detector
+    that had simply been switched off.
+    """
+
+    def warning_for(self, command):
+        """What the hook says before `command` leaves for @h1 — "" when it says nothing."""
+        with TmpConf() as c:
+            c.route_to("h1")
+            _, out = run_hook(c, "Bash", {"command": command})
+            return context_of(out) or ""
+
+    # the idiom — silent
+    def test_stderr_to_dev_null_is_silent(self):
+        self.assertNotIn("truncates", self.warning_for("cat /etc/hosts 2>/dev/null"))
+
+    def test_stdout_to_dev_null_is_silent(self):
+        self.assertNotIn("truncates", self.warning_for("ls -la >/dev/null"))
+
+    def test_a_space_before_dev_null_is_silent(self):
+        self.assertNotIn("truncates", self.warning_for("ls -la > /dev/null"))
+
+    def test_both_streams_to_dev_null_is_silent(self):
+        self.assertNotIn("truncates", self.warning_for("ls -la > /dev/null 2>&1"))
+
+    def test_the_ampersand_form_is_silent(self):
+        self.assertNotIn("truncates", self.warning_for("ls -la &>/dev/null"))
+
+    def test_a_stream_moved_onto_another_is_silent(self):
+        """`2>&1` never pointed at a file — it was already excluded, and stays so."""
+        self.assertNotIn("truncates", self.warning_for("grep -r x . 2>&1 | head"))
+
+    def test_an_appending_redirect_beside_the_idiom_is_silent(self):
+        """`>>` adds; the `2>/dev/null` next to it must not speak for it."""
+        self.assertNotIn("truncates", self.warning_for("echo x >> /var/log/x 2>/dev/null"))
+
+    # the real thing — still loud
+    def test_a_redirect_to_a_file_still_warns(self):
+        self.assertIn("truncates", self.warning_for("ls -la > /tmp/listing"))
+
+    def test_a_path_that_merely_starts_like_dev_null_still_warns(self):
+        """/dev/nullish is somebody's file. The exclusion ends at the word boundary."""
+        self.assertIn("truncates", self.warning_for("ls -la > /dev/nullish"))
+
+    def test_the_ampersand_form_to_a_file_still_warns(self):
+        self.assertIn("truncates", self.warning_for("ls -la &> /tmp/listing"))
+
+    def test_the_idiom_does_not_silence_the_command_it_sits_on(self):
+        """Only the REDIRECT is excused. `rm` is still `rm`."""
+        warning = self.warning_for("rm -rf /var/log/old 2>/dev/null")
+        self.assertIn("cannot be taken back", warning)
+        self.assertIn("rm", warning)
+        self.assertNotIn("truncates", warning)
+
+
 # ── boundaries ─────────────────────────────────────────────────────────────────
 
-class TestBoundaries(unittest.TestCase):
 
+class TestBoundaries(unittest.TestCase):
     def test_unknown_tool_is_ignored(self):
         with TmpConf() as c:
             c.route_to("h1")
@@ -300,12 +370,12 @@ class TestBoundaries(unittest.TestCase):
                 self.assertEqual(code, 0, f"{tool} did not exit 0")
 
     def test_garbage_stdin_does_not_crash(self):
-        r = subprocess.run([sys.executable, PRETOOL], input=b"not json",
-                           capture_output=True, env=hook_env())
+        r = subprocess.run([sys.executable, PRETOOL], input=b"not json", capture_output=True, env=hook_env())
         self.assertEqual(r.returncode, 0)
 
 
 # ── ADDITION: the legacy `hosts` file, walked through the HOOK ─────────────────
+
 
 class LegacyConf(TmpConf):
     """The same two hosts, written in the OLD `hosts` format."""

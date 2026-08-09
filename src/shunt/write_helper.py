@@ -18,6 +18,7 @@ Output JSON:
   conflict → {"status":"conflict", "current_sha":str, "base_sha":str}
   error    → {"status":"error", "message":str}
 """
+
 import base64
 import hashlib
 import json
@@ -36,24 +37,24 @@ def out(d):
 
 def main():
     try:
-        if len(sys.argv) > 1:           # inline deployment: JSON as base64 argv
+        if len(sys.argv) > 1:  # inline deployment: JSON as base64 argv
             req = json.loads(base64.b64decode(sys.argv[1]))
-        else:                           # local / interactive: JSON from stdin
+        else:  # local / interactive: JSON from stdin
             req = json.load(sys.stdin)
     except Exception as e:
         return out({"status": "error", "message": f"bad request: {e}"})
 
     path = os.path.realpath(req.get("file", ""))
     content_b64 = req.get("content_b64", "")
-    base_sha = req.get("base_sha")      # null → skip check (new file)
+    base_sha = req.get("base_sha")  # null → skip check (new file)
 
     # --- size guard (before decoding, to catch inflated payloads early) ---
     MAX = int(os.environ.get("SHUNT_EDIT_MAX_BYTES", str(64 * 1024 * 1024)))
     # rough check: base64 is ~4/3 of binary; a 64-MB file ≈ 87 MB of b64
     if len(content_b64) > MAX * 2:
-        return out({"status": "error",
-                    "message": f"payload too large ({len(content_b64)} b64 chars); "
-                               f"limit {MAX} bytes raw"})
+        return out(
+            {"status": "error", "message": f"payload too large ({len(content_b64)} b64 chars); limit {MAX} bytes raw"}
+        )
 
     try:
         new_bytes = base64.b64decode(content_b64)
@@ -61,9 +62,12 @@ def main():
         return out({"status": "error", "message": f"base64 decode failed: {e}"})
 
     if len(new_bytes) > MAX:
-        return out({"status": "error",
-                    "message": f"content too large ({len(new_bytes)} bytes > limit {MAX}); "
-                               "use shunt cp + local edit"})
+        return out(
+            {
+                "status": "error",
+                "message": f"content too large ({len(new_bytes)} bytes > limit {MAX}); use shunt cp + local edit",
+            }
+        )
 
     # --- read current state ---
     file_existed = os.path.exists(path)
@@ -79,8 +83,14 @@ def main():
 
     # --- optimistic SHA lock ---
     if base_sha is not None and base_sha != cur_sha:
-        return out({"status": "conflict", "current_sha": cur_sha, "base_sha": base_sha,
-                    "hint": "the file has changed; re-checkout and try again"})
+        return out(
+            {
+                "status": "conflict",
+                "current_sha": cur_sha,
+                "base_sha": base_sha,
+                "hint": "the file has changed; re-checkout and try again",
+            }
+        )
 
     # --- atomic write: mkstemp in same dir → write → fsync → chmod/chown → replace → fsync dir ---
     d = os.path.dirname(path) or "."
@@ -104,7 +114,7 @@ def main():
                 os.chown(tmp, st.st_uid, st.st_gid)
             except Exception:
                 pass
-        os.replace(tmp, path)           # atomic on the same filesystem
+        os.replace(tmp, path)  # atomic on the same filesystem
         tmp = None
         dfd = os.open(d, os.O_RDONLY)
         try:
@@ -128,8 +138,7 @@ def main():
 
     expected_sha = sha256(new_bytes)
     if vsha != expected_sha:
-        return out({"status": "error", "message": "verify mismatch after write",
-                    "new_sha": vsha, "verified": False})
+        return out({"status": "error", "message": "verify mismatch after write", "new_sha": vsha, "verified": False})
 
     out({"status": "ok", "new_sha": vsha, "verified": True})
 

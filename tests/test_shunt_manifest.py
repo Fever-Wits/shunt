@@ -3,6 +3,9 @@ Tests for shunt.cli — manifest logic and subcommand registry.
 
 Coverage:
   - _manifest_load / _manifest_save round-trip
+  - a manifest that PARSES but is not an object refuses the same way an unreadable one
+    does: `null` used to reach "no checkouts" and exit 0, a non-empty list used to reach
+    a bare traceback
   - _checkout_local_path computation
   - _sha256_file
   - cmd_checkout manifest side-effects (subprocess.run stubbed → no real ssh)
@@ -17,6 +20,7 @@ Coverage:
 SHUNT_CONF is redirected to a temp dir for every test that touches the filesystem.
 subprocess.run is monkeypatched to avoid real ssh/scp calls.
 """
+
 import hashlib
 import io
 import json
@@ -32,6 +36,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import shunt.cli as shunt_mod
 
 # ── helpers ────────────────────────────────────────────────────────────────────
+
 
 def sha256(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
@@ -55,10 +60,12 @@ class TmpConf:
         shunt_mod.CONF = self._orig_conf
         shunt_mod.MANIFEST = self._orig_manifest
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
 
 # ── AC-3a: import smoke ────────────────────────────────────────────────────────
+
 
 class TestImportSmoke(unittest.TestCase):
     """Importing shunt.cli does not raise; key callables are present."""
@@ -84,6 +91,7 @@ class TestImportSmoke(unittest.TestCase):
 
 # ── AC-3b: fns dict ────────────────────────────────────────────────────────────
 
+
 class TestFnsDict(unittest.TestCase):
     """fns dict in main() contains checkout+commit and all pre-existing subcommands."""
 
@@ -96,11 +104,9 @@ class TestFnsDict(unittest.TestCase):
 
     def test_all_expected_subcommands_present(self):
         """All expected subcommand functions exist at module level."""
-        for name in ("hosts", "read", "edit", "cp", "bg", "get", "log",
-                     "install", "checkout", "commit"):
+        for name in ("hosts", "read", "edit", "cp", "bg", "get", "log", "install", "checkout", "commit"):
             fn_name = "cmd_" + name
-            self.assertIn(fn_name, dir(shunt_mod),
-                          f"Missing subcommand function: {fn_name}")
+            self.assertIn(fn_name, dir(shunt_mod), f"Missing subcommand function: {fn_name}")
 
     def test_main_lists_checkout_commit_in_map(self):
         """main() with no args prints the map, and the map includes checkout and commit.
@@ -114,7 +120,7 @@ class TestFnsDict(unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 shunt_mod.main()
             out = mock_out.getvalue()
-        self.assertEqual(ctx.exception.code, 2)   # no-args = missing subcommand = error
+        self.assertEqual(ctx.exception.code, 2)  # no-args = missing subcommand = error
         self.assertIn("checkout", out)
         self.assertIn("commit", out)
 
@@ -150,6 +156,7 @@ class TestFnsDict(unittest.TestCase):
 
 # ── Manifest helpers ────────────────────────────────────────────────────────────
 
+
 class TestManifestHelpers(unittest.TestCase):
     """_manifest_load / _manifest_save / _sha256_file / _checkout_local_path."""
 
@@ -160,8 +167,7 @@ class TestManifestHelpers(unittest.TestCase):
 
     def test_save_and_load_round_trip(self):
         with TmpConf():
-            data = {"/some/local/path.py": {"host": "myhost", "remote": "/remote/path.py",
-                                             "base_sha": "abc123"}}
+            data = {"/some/local/path.py": {"host": "myhost", "remote": "/remote/path.py", "base_sha": "abc123"}}
             shunt_mod._manifest_save(data)
             loaded = shunt_mod._manifest_load()
         self.assertEqual(loaded, data)
@@ -181,13 +187,164 @@ class TestManifestHelpers(unittest.TestCase):
             tmp_path = shunt_mod.MANIFEST + ".tmp"
             self.assertFalse(os.path.exists(tmp_path))
 
-    def test_corrupt_manifest_returns_empty(self):
+    # ── a manifest that cannot be read is not an empty one ─────────────────────
+    # This block replaces test_corrupt_manifest_returns_empty, which asserted the
+    # opposite and so froze the defect in place: a corrupt manifest came back as {},
+    # and {} MEANS "nothing is checked out" to everything downstream. The worst of it
+    # was not the wrong answer but the repair — a `checkout` run to recover saved the
+    # file back with one entry and took every other base_sha with it.
+
+    def _write_manifest(self, text):
+        os.makedirs(os.path.dirname(shunt_mod.MANIFEST), exist_ok=True)
+        with open(shunt_mod.MANIFEST, "w") as f:
+            f.write(text)
+
+    def _corrupt(self):
+        self._write_manifest("{not valid json")
+
+    def test_corrupt_manifest_refuses(self):
         with TmpConf():
-            os.makedirs(os.path.dirname(shunt_mod.MANIFEST), exist_ok=True)
-            with open(shunt_mod.MANIFEST, "w") as f:
-                f.write("{not valid json")
-            result = shunt_mod._manifest_load()
-        self.assertEqual(result, {})
+            self._corrupt()
+            with self.assertRaises(SystemExit):
+                shunt_mod._manifest_load()
+
+    def test_corrupt_manifest_says_where_it_is(self):
+        """A refusal nobody can act on is only half of one."""
+        with TmpConf():
+            self._corrupt()
+            err = io.StringIO()
+            with patch.object(sys, "stderr", err), self.assertRaises(SystemExit):
+                shunt_mod._manifest_load()
+            self.assertIn(shunt_mod.MANIFEST, err.getvalue())
+
+    def test_corrupt_manifest_is_not_overwritten_by_a_checkout(self):
+        """The recovery attempt was the destructive step: `checkout` loaded {},
+        added its own entry and saved — every other checkout's base_sha gone.
+
+        And the SECOND victim, which the first version of this fix still lost: the
+        manifest used to be read AFTER `os.replace(part, local)`, so a refusal arrived
+        with the pull already moved into place. A re-checkout over an edited file
+        destroyed exactly the work the refusal then said it had left alone — the gate
+        is worth nothing behind the write it is meant to gate.
+
+        ssh is stubbed to SUCCEED, so a pull that reaches the save would perform it;
+        what stops it has to be the manifest refusing, not the transport failing.
+        """
+        precious = b"MY PRECIOUS LOCAL EDITS\n"
+
+        def fake_run(cmd, **kwargs):
+            stdout = kwargs.get("stdout")
+            if stdout and hasattr(stdout, "write"):
+                stdout.write(b"whatever the remote says\n")
+            m = MagicMock()
+            m.returncode = 0
+            m.stderr = b""
+            return m
+
+        with TmpConf() as conf:
+            with open(os.path.join(conf, "shunt.toml"), "w") as f:
+                f.write('[hosts]\nmyhost = "root@10.0.0.1"\n')
+            local = os.path.realpath(shunt_mod._checkout_local_path("myhost", "/remote/file.py"))
+            os.makedirs(os.path.dirname(local), exist_ok=True)
+            with open(local, "wb") as f:
+                f.write(precious)
+            self._corrupt()
+            with open(shunt_mod.MANIFEST) as f:
+                before = f.read()
+
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stderr", new_callable=io.StringIO),
+                patch("sys.stdout", new_callable=io.StringIO),
+            ):
+                with self.assertRaises(SystemExit):
+                    shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
+
+            with open(shunt_mod.MANIFEST) as f:
+                self.assertEqual(f.read(), before)
+            with open(local, "rb") as f:  # the edits the refusal promised
+                self.assertEqual(f.read(), precious)
+            self.assertFalse(os.path.exists(local + ".part"))
+
+    def test_the_refusal_tells_the_truth_about_the_local_files(self):
+        """The message says the local files stay where they are. It has to be true —
+        a refusal that misdescribes what it did is worse than one that says nothing."""
+        with TmpConf():
+            self._corrupt()
+            err = io.StringIO()
+            with patch.object(sys, "stderr", err), self.assertRaises(SystemExit):
+                shunt_mod._manifest_load()
+            self.assertIn("local files stay where they are", err.getvalue())
+
+    def test_corrupt_manifest_does_not_report_an_empty_commit(self):
+        """`commit` used to print "no checkouts in manifest" and return 0."""
+        with TmpConf():
+            self._corrupt()
+            with self.assertRaises(SystemExit):
+                shunt_mod.cmd_commit([])
+
+    # ── a manifest that PARSES is not yet a manifest ───────────────────────────
+    # The refusal above only ever asked whether json.load raised. `null` does not: it
+    # parses cleanly to None, which is FALSY — so it walked straight past the guard and
+    # into "no checkouts in manifest", exit 0, while edited files sat unpushed. Word for
+    # word the answer the refusal exists to prevent, arriving through the door left open.
+    # `[]` takes that same falsy path. A non-empty list or a string takes the other one
+    # and reaches `m.keys()` as a bare AttributeError. Both classes are the same fact —
+    # this is not a mapping of checkouts — so both fall to the same refusal.
+
+    NOT_AN_OBJECT = ("null", "[]", '["/some/local/path.py"]', '"a string"', "42")
+
+    def test_a_json_value_that_is_not_an_object_refuses(self):
+        for text in self.NOT_AN_OBJECT:
+            with self.subTest(manifest=text), TmpConf():
+                self._write_manifest(text)
+                with self.assertRaises(SystemExit):
+                    shunt_mod._manifest_load()
+
+    def test_the_refusal_names_the_file_and_what_it_found(self):
+        """The same actionable refusal as the unreadable one — plus the reason, because
+        "cannot read" over a file that is plainly readable would send the reader hunting
+        for a permissions problem that is not there."""
+        with TmpConf():
+            self._write_manifest("null")
+            err = io.StringIO()
+            with patch.object(sys, "stderr", err), self.assertRaises(SystemExit):
+                shunt_mod._manifest_load()
+            self.assertIn(shunt_mod.MANIFEST, err.getvalue())
+            self.assertIn("null", err.getvalue())
+
+    def test_a_null_manifest_does_not_report_an_empty_commit(self):
+        """The defect itself: `commit` printed "no checkouts in manifest" and exited 0."""
+        with TmpConf():
+            self._write_manifest("null")
+            with self.assertRaises(SystemExit):
+                shunt_mod.cmd_commit([])
+
+    def test_a_null_manifest_does_not_report_an_empty_list(self):
+        with TmpConf():
+            self._write_manifest("null")
+            with self.assertRaises(SystemExit):
+                shunt_mod.cmd_checkout(["--list"])
+
+    def test_a_list_manifest_refuses_instead_of_raising(self):
+        """`["…"]` used to reach `m.items()` and print a traceback. A refusal says what
+        is wrong with the file; a traceback says what is wrong with our code."""
+        with TmpConf():
+            self._write_manifest('["/some/local/path.py"]')
+            with self.assertRaises(SystemExit):
+                shunt_mod.cmd_checkout(["--list"])
+
+    def test_an_empty_object_is_still_the_ordinary_empty_state(self):
+        """The line the type check must not cross: `{}` is a real, legitimate manifest —
+        every checkout abandoned — and stays the quiet answer it always was."""
+        with TmpConf():
+            self._write_manifest("{}")
+            self.assertEqual(shunt_mod._manifest_load(), {})
+
+    def test_missing_manifest_is_still_the_ordinary_empty_state(self):
+        """The other side of the split: absent is not an error, and must not become one."""
+        with TmpConf():
+            self.assertEqual(shunt_mod._manifest_load(), {})
 
     def test_sha256_file_existing(self):
         with TmpConf() as conf:
@@ -225,6 +382,7 @@ class TestManifestHelpers(unittest.TestCase):
 
 # ── cmd_checkout --list ────────────────────────────────────────────────────────
 
+
 class TestCheckoutList(unittest.TestCase):
     """--list reads manifest and prints it."""
 
@@ -238,8 +396,7 @@ class TestCheckoutList(unittest.TestCase):
     def test_list_shows_entries(self):
         with TmpConf():
             data = {
-                "/local/file.py": {"host": "srv1", "remote": "/remote/file.py",
-                                   "base_sha": "abcdef123456"},
+                "/local/file.py": {"host": "srv1", "remote": "/remote/file.py", "base_sha": "abcdef123456"},
             }
             shunt_mod._manifest_save(data)
             with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
@@ -275,13 +432,14 @@ class TestCheckoutList(unittest.TestCase):
             lines = [l for l in mock_out.getvalue().splitlines() if l.strip()]
             # sorted: /a comes before /z
             self.assertLess(lines[0].find("/a/first.py"), len(lines[0]))
-            self.assertGreater(lines.index(
-                next(l for l in lines if "/z/last.py" in l)),
+            self.assertGreater(
+                lines.index(next(l for l in lines if "/z/last.py" in l)),
                 lines.index(next(l for l in lines if "/a/first.py" in l)),
             )
 
 
 # ── cmd_checkout --abandon ─────────────────────────────────────────────────────
+
 
 class TestCheckoutAbandon(unittest.TestCase):
     """--abandon removes manifest entry, leaves local file in place."""
@@ -332,6 +490,7 @@ class TestCheckoutAbandon(unittest.TestCase):
 
 # ── cmd_checkout (main pull path, ssh stubbed) ─────────────────────────────────
 
+
 class TestCheckoutPull(unittest.TestCase):
     """cmd_checkout @host <remote_path> writes manifest entry."""
 
@@ -358,8 +517,7 @@ class TestCheckoutPull(unittest.TestCase):
 
         with TmpConf() as conf:
             self._make_hosts(conf)
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stdout", new_callable=io.StringIO):
+            with patch("subprocess.run", side_effect=fake_run), patch("sys.stdout", new_callable=io.StringIO):
                 rc = shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
 
             self.assertEqual(rc, 0)
@@ -391,8 +549,10 @@ class TestCheckoutPull(unittest.TestCase):
 
         with TmpConf() as conf:
             self._make_hosts(conf)
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stdout", new_callable=io.StringIO) as mock_out,
+            ):
                 shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
             output = mock_out.getvalue().strip()
             # printed path must be an absolute path within CONF/checkouts/
@@ -401,6 +561,7 @@ class TestCheckoutPull(unittest.TestCase):
 
     def test_checkout_ssh_failure_cleans_up(self):
         """If ssh cat fails, local file is removed and rc is non-zero."""
+
         def fake_run(cmd, **kwargs):
             stdout = kwargs.get("stdout")
             if stdout and hasattr(stdout, "write"):
@@ -412,9 +573,11 @@ class TestCheckoutPull(unittest.TestCase):
 
         with TmpConf() as conf:
             self._make_hosts(conf)
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stderr", new_callable=io.StringIO), \
-                 self.assertRaises(SystemExit) as ctx:
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stderr", new_callable=io.StringIO),
+                self.assertRaises(SystemExit) as ctx,
+            ):
                 shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
             self.assertNotEqual(ctx.exception.code, 0)
             # manifest must NOT have a new entry
@@ -438,7 +601,7 @@ class TestCheckoutPull(unittest.TestCase):
         def fake_run(cmd, **kwargs):
             stdout = kwargs.get("stdout")
             if stdout and hasattr(stdout, "write"):
-                stdout.write(b"partial garbage")     # a half-written pull, then failure
+                stdout.write(b"partial garbage")  # a half-written pull, then failure
             m = MagicMock()
             m.returncode = 255
             m.stderr = b"ssh: connect to host 203.0.113.1 port 22: No route to host"
@@ -450,21 +613,23 @@ class TestCheckoutPull(unittest.TestCase):
             os.makedirs(os.path.dirname(local), exist_ok=True)
             with open(local, "wb") as f:
                 f.write(edited)
-            shunt_mod._manifest_save({local: {"host": "myhost", "remote": "/remote/file.py",
-                                              "base_sha": "sha_from_the_first_checkout"}})
+            shunt_mod._manifest_save(
+                {local: {"host": "myhost", "remote": "/remote/file.py", "base_sha": "sha_from_the_first_checkout"}}
+            )
 
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stderr", new_callable=io.StringIO), \
-                 self.assertRaises(SystemExit) as ctx:
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stderr", new_callable=io.StringIO),
+                self.assertRaises(SystemExit) as ctx,
+            ):
                 shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
 
             self.assertNotEqual(ctx.exception.code, 0)
             with open(local, "rb") as f:
-                self.assertEqual(f.read(), edited)   # the edits are still there
+                self.assertEqual(f.read(), edited)  # the edits are still there
             self.assertFalse(os.path.exists(local + ".part"))
             # the manifest still describes the checkout that DID happen
-            self.assertEqual(shunt_mod._manifest_load()[local]["base_sha"],
-                             "sha_from_the_first_checkout")
+            self.assertEqual(shunt_mod._manifest_load()[local]["base_sha"], "sha_from_the_first_checkout")
 
     def test_checkout_rejects_path_traversal(self):
         """A remote_path with '..' that escapes the sandbox is refused before any
@@ -473,14 +638,18 @@ class TestCheckoutPull(unittest.TestCase):
 
         def fake_run(cmd, **kwargs):
             called["ssh"] = True
-            m = MagicMock(); m.returncode = 0; m.stderr = b""
+            m = MagicMock()
+            m.returncode = 0
+            m.stderr = b""
             return m
 
         with TmpConf() as conf:
             self._make_hosts(conf)
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stderr", new_callable=io.StringIO), \
-                 self.assertRaises(SystemExit) as ctx:
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stderr", new_callable=io.StringIO),
+                self.assertRaises(SystemExit) as ctx,
+            ):
                 shunt_mod.cmd_checkout(["@myhost", "/../../../../etc/passwd"])
             self.assertNotEqual(ctx.exception.code, 0)
             self.assertFalse(called["ssh"], "guard must fire before any ssh call")
@@ -504,12 +673,10 @@ class TestCheckoutPull(unittest.TestCase):
             self._make_hosts(conf)
             # pre-populate manifest with stale sha
             expected_local = os.path.realpath(shunt_mod._checkout_local_path("myhost", "/remote/file.py"))
-            shunt_mod._manifest_save({
-                expected_local: {"host": "myhost", "remote": "/remote/file.py",
-                                 "base_sha": "stale_sha"}
-            })
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stdout", new_callable=io.StringIO):
+            shunt_mod._manifest_save(
+                {expected_local: {"host": "myhost", "remote": "/remote/file.py", "base_sha": "stale_sha"}}
+            )
+            with patch("subprocess.run", side_effect=fake_run), patch("sys.stdout", new_callable=io.StringIO):
                 shunt_mod.cmd_checkout(["@myhost", "/remote/file.py"])
 
             m = shunt_mod._manifest_load()
@@ -523,6 +690,7 @@ class TestCheckoutPull(unittest.TestCase):
 
 # ── cmd_commit --abandon ───────────────────────────────────────────────────────
 
+
 class TestCommitAbandon(unittest.TestCase):
     """cmd_commit --abandon removes manifest entry, leaves local file."""
 
@@ -532,8 +700,7 @@ class TestCommitAbandon(unittest.TestCase):
             with open(local, "w") as f:
                 f.write("edited content")
             real_local = os.path.realpath(local)
-            shunt_mod._manifest_save({real_local: {"host": "h", "remote": "/r.py",
-                                                    "base_sha": "s"}})
+            shunt_mod._manifest_save({real_local: {"host": "h", "remote": "/r.py", "base_sha": "s"}})
             with patch("sys.stdout", new_callable=io.StringIO):
                 rc = shunt_mod.cmd_commit(["--abandon", local])
             self.assertEqual(rc, 0)
@@ -545,8 +712,7 @@ class TestCommitAbandon(unittest.TestCase):
             with open(local, "w") as f:
                 f.write("do not delete")
             real_local = os.path.realpath(local)
-            shunt_mod._manifest_save({real_local: {"host": "h", "remote": "/r.py",
-                                                    "base_sha": "s"}})
+            shunt_mod._manifest_save({real_local: {"host": "h", "remote": "/r.py", "base_sha": "s"}})
             with patch("sys.stdout", new_callable=io.StringIO):
                 shunt_mod.cmd_commit(["--abandon", local])
             self.assertTrue(os.path.exists(local))
@@ -564,6 +730,7 @@ class TestCommitAbandon(unittest.TestCase):
 
 # ── cmd_commit — push path (ssh stubbed) ──────────────────────────────────────
 
+
 class TestCommitPush(unittest.TestCase):
     """cmd_commit pushes local edits to remote via write_helper (ssh stubbed)."""
 
@@ -576,16 +743,14 @@ class TestCommitPush(unittest.TestCase):
         with open(local, "wb") as f:
             f.write(local_content)
         base_sha = sha256(local_content)
-        shunt_mod._manifest_save({local: {"host": "myhost", "remote": "/remote/file.py",
-                                           "base_sha": base_sha}})
+        shunt_mod._manifest_save({local: {"host": "myhost", "remote": "/remote/file.py", "base_sha": base_sha}})
         return local, base_sha
 
     def test_commit_success_updates_manifest_sha(self):
         """On ok from write_helper, manifest base_sha is updated to new_sha."""
         local_content = b"edited content\n"
         new_sha = sha256(local_content)
-        write_helper_response = json.dumps({"status": "ok", "new_sha": new_sha,
-                                            "verified": True}).encode()
+        write_helper_response = json.dumps({"status": "ok", "new_sha": new_sha, "verified": True}).encode()
 
         call_count = {"n": 0}
 
@@ -607,8 +772,10 @@ class TestCommitPush(unittest.TestCase):
 
         with TmpConf() as conf:
             local, _ = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stdout", new_callable=io.StringIO) as mock_out,
+            ):
                 rc = shunt_mod.cmd_commit([])
 
             self.assertEqual(rc, 0)
@@ -628,30 +795,30 @@ class TestCommitPush(unittest.TestCase):
             with open(stale, "wb") as f:
                 f.write(b"old\n")
             m = shunt_mod._manifest_load()
-            m[stale] = {"host": "goneaway", "remote": "/remote/old.py",
-                        "base_sha": sha256(b"old\n")}
+            m[stale] = {"host": "goneaway", "remote": "/remote/old.py", "base_sha": sha256(b"old\n")}
             shunt_mod._manifest_save(m)
 
             reached = {"good": False}
 
             def fake_run(cmd, **kwargs):
-                reached["good"] = True          # only the surviving host gets here
+                reached["good"] = True  # only the surviving host gets here
                 r = MagicMock()
                 r.returncode = 0
                 r.stdout = (base_sha + "  /remote/file.py\n").encode()
                 r.stderr = b""
                 return r
 
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stdout", new_callable=io.StringIO) as mock_out,
+            ):
                 rc = shunt_mod.cmd_commit([])
             output = mock_out.getvalue()
 
         self.assertIn("SKIP", output)
         self.assertIn("goneaway", output)
-        self.assertNotEqual(rc, 0)                    # the failure is reported
-        self.assertTrue(reached["good"],
-                        "the entry after the stale one was never processed")
+        self.assertNotEqual(rc, 0)  # the failure is reported
+        self.assertTrue(reached["good"], "the entry after the stale one was never processed")
 
     def test_commit_conflict_detected_before_push(self):
         """If remote sha differs from manifest base_sha, commit reports CONFLICT and does not push."""
@@ -674,8 +841,10 @@ class TestCommitPush(unittest.TestCase):
 
         with TmpConf() as conf:
             local, base_sha = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stdout", new_callable=io.StringIO) as mock_out,
+            ):
                 rc = shunt_mod.cmd_commit([])
 
             self.assertNotEqual(rc, 0)
@@ -701,15 +870,13 @@ class TestCommitPush(unittest.TestCase):
                 m.stderr = b""
             else:
                 m.returncode = 0
-                m.stdout = json.dumps({"status": "ok", "new_sha": new_sha,
-                                       "verified": True}).encode()
+                m.stdout = json.dumps({"status": "ok", "new_sha": new_sha, "verified": True}).encode()
                 m.stderr = b""
             return m
 
         with TmpConf() as conf:
             local, _ = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stdout", new_callable=io.StringIO):
+            with patch("subprocess.run", side_effect=fake_run), patch("sys.stdout", new_callable=io.StringIO):
                 rc = shunt_mod.cmd_commit([local])
             self.assertEqual(rc, 0)
 
@@ -723,9 +890,7 @@ class TestCommitPush(unittest.TestCase):
             with open(os.path.join(conf, "hosts"), "w") as f:
                 f.write("myhost ssh user@203.0.113.1\n")
             # populate manifest with a real (different) entry so the early-return is skipped
-            shunt_mod._manifest_save({
-                "/some/other/file.py": {"host": "myhost", "remote": "/r.py", "base_sha": "x"}
-            })
+            shunt_mod._manifest_save({"/some/other/file.py": {"host": "myhost", "remote": "/r.py", "base_sha": "x"}})
             with self.assertRaises(SystemExit) as ctx:
                 shunt_mod.cmd_commit(["/path/not/in/manifest.py"])
             self.assertNotEqual(ctx.exception.code, 0)
@@ -755,18 +920,22 @@ class TestCommitPush(unittest.TestCase):
             else:
                 # write_helper returns conflict (race: file changed mid-flight)
                 m.returncode = 0
-                m.stdout = json.dumps({
-                    "status": "conflict",
-                    "current_sha": "e" * 64,
-                    "base_sha": sha256(local_content),
-                }).encode()
+                m.stdout = json.dumps(
+                    {
+                        "status": "conflict",
+                        "current_sha": "e" * 64,
+                        "base_sha": sha256(local_content),
+                    }
+                ).encode()
                 m.stderr = b""
             return m
 
         with TmpConf() as conf:
             local, base_sha = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stdout", new_callable=io.StringIO) as mock_out,
+            ):
                 rc = shunt_mod.cmd_commit([])
 
             self.assertNotEqual(rc, 0)
@@ -790,17 +959,21 @@ class TestCommitPush(unittest.TestCase):
                 m.stderr = b""
             else:
                 m.returncode = 0
-                m.stdout = json.dumps({
-                    "status": "error",
-                    "message": "write failed: permission denied",
-                }).encode()
+                m.stdout = json.dumps(
+                    {
+                        "status": "error",
+                        "message": "write failed: permission denied",
+                    }
+                ).encode()
                 m.stderr = b""
             return m
 
         with TmpConf() as conf:
             _, _ = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stdout", new_callable=io.StringIO) as mock_out,
+            ):
                 rc = shunt_mod.cmd_commit([])
 
             self.assertNotEqual(rc, 0)
@@ -819,8 +992,10 @@ class TestCommitPush(unittest.TestCase):
 
         with TmpConf() as conf:
             _, _ = self._setup_conf(conf, local_content)
-            with patch("subprocess.run", side_effect=fake_run), \
-                 patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stdout", new_callable=io.StringIO) as mock_out,
+            ):
                 rc = shunt_mod.cmd_commit([])
 
             self.assertNotEqual(rc, 0)

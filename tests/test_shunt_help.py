@@ -16,6 +16,7 @@ Coverage:
 The CLI is run as `python -m shunt` — the packaged entry point in a subprocess, which
 is what an exit code can be read from.
 """
+
 import os
 import re
 import subprocess
@@ -32,13 +33,13 @@ SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 
 
 def run_cli(*args):
-    r = subprocess.run([sys.executable, "-m", "shunt", *args], capture_output=True,
-                       env=dict(os.environ, PYTHONPATH=SRC))
+    r = subprocess.run(
+        [sys.executable, "-m", "shunt", *args], capture_output=True, env=dict(os.environ, PYTHONPATH=SRC)
+    )
     return r.returncode, r.stdout.decode(), r.stderr.decode()
 
 
 class TestMapIsPrinted(unittest.TestCase):
-
     def test_no_arguments_prints_map_but_fails(self):
         """Asking and forgetting both get the map — only the exit code separates them.
 
@@ -83,7 +84,6 @@ class TestMapMatchesCode(unittest.TestCase):
 
 
 class TestUnknownStillFails(unittest.TestCase):
-
     def test_unknown_subcommand_exits_nonzero(self):
         code, _, err = run_cli("no-such-cmd")
         self.assertNotEqual(code, 0)

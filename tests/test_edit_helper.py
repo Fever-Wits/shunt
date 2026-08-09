@@ -19,6 +19,7 @@ what happened; it must not drift even when the matching underneath is rewritten.
 Driven exactly as the CLI calls it: base64 argv (inline-deploy) and JSON on stdin.
 No remote host is touched; edit_helper.py runs via subprocess on localhost.
 """
+
 import base64
 import hashlib
 import json
@@ -29,8 +30,7 @@ import sys
 import tempfile
 import unittest
 
-EDIT_HELPER = os.path.join(os.path.dirname(__file__), "..", "src", "shunt",
-                           "edit_helper.py")
+EDIT_HELPER = os.path.join(os.path.dirname(__file__), "..", "src", "shunt", "edit_helper.py")
 PYTHON = sys.executable
 
 
@@ -47,8 +47,7 @@ def run_via_argv(payload: dict) -> dict:
 
 def run_via_stdin(payload: dict) -> dict:
     """Drive edit_helper via stdin JSON (interactive path)."""
-    r = subprocess.run([PYTHON, EDIT_HELPER], input=json.dumps(payload).encode(),
-                       capture_output=True)
+    r = subprocess.run([PYTHON, EDIT_HELPER], input=json.dumps(payload).encode(), capture_output=True)
     return json.loads(r.stdout.decode())
 
 
@@ -74,6 +73,7 @@ class EditCase(unittest.TestCase):
 
 # ── the defect: bytes outside the match must survive ───────────────────────────
 
+
 class TestNonUtf8BytesSurvive(EditCase):
     """A config with one latin-1 byte in a comment is an ordinary file, not an exotic one."""
 
@@ -82,8 +82,7 @@ class TestNonUtf8BytesSurvive(EditCase):
     def test_the_edit_changes_only_what_was_asked_for(self):
         path = self.make(self.ORIGINAL)
 
-        result = run_via_argv({"file": path, "old": "listen 80;",
-                               "new": "listen 8080;", "expected": 1})
+        result = run_via_argv({"file": path, "old": "listen 80;", "new": "listen 8080;", "expected": 1})
 
         self.assertEqual(result["status"], "ok", result)
         self.assertEqual(self.bytes_of(path), b"# caf\xe9 comment\nlisten 8080;\n")
@@ -92,8 +91,7 @@ class TestNonUtf8BytesSurvive(EditCase):
         """Named on its own: U+FFFD (\\xef\\xbf\\xbd) in the file is the corruption."""
         path = self.make(self.ORIGINAL)
 
-        run_via_argv({"file": path, "old": "listen 80;", "new": "listen 8080;",
-                      "expected": 1})
+        run_via_argv({"file": path, "old": "listen 80;", "new": "listen 8080;", "expected": 1})
 
         self.assertNotIn(b"\xef\xbf\xbd", self.bytes_of(path))
         self.assertIn(b"caf\xe9", self.bytes_of(path))
@@ -102,8 +100,7 @@ class TestNonUtf8BytesSurvive(EditCase):
         """`verified` and `new_sha` describe the file, or they are decoration."""
         path = self.make(self.ORIGINAL)
 
-        result = run_via_argv({"file": path, "old": "listen 80;",
-                               "new": "listen 8080;", "expected": 1})
+        result = run_via_argv({"file": path, "old": "listen 80;", "new": "listen 8080;", "expected": 1})
 
         self.assertTrue(result["verified"], result)
         self.assertEqual(result["new_sha"], sha256(self.bytes_of(path)))
@@ -116,8 +113,7 @@ class TestNonUtf8BytesSurvive(EditCase):
         """
         path = self.make(self.ORIGINAL)
 
-        result = run_via_argv({"file": path, "old": "café comment",
-                               "new": "cafe comment", "expected": 1})
+        result = run_via_argv({"file": path, "old": "café comment", "new": "cafe comment", "expected": 1})
 
         self.assertEqual(result["status"], "not_found", result)
         self.assertEqual(self.bytes_of(path), self.ORIGINAL)
@@ -132,19 +128,16 @@ class TestMixedLineEndingsSurvive(EditCase):
         """The old is written with LF, the match lives in a CRLF region, the tail is LF."""
         path = self.make(self.ORIGINAL)
 
-        result = run_via_argv({"file": path, "old": "alpha\nlisten 80;",
-                               "new": "alpha\nlisten 8080;", "expected": 1})
+        result = run_via_argv({"file": path, "old": "alpha\nlisten 80;", "new": "alpha\nlisten 8080;", "expected": 1})
 
         self.assertEqual(result["status"], "ok", result)
-        self.assertEqual(self.bytes_of(path),
-                         b"alpha\r\nlisten 8080;\r\nbeta\ngamma\n")
+        self.assertEqual(self.bytes_of(path), b"alpha\r\nlisten 8080;\r\nbeta\ngamma\n")
 
     def test_the_matched_region_keeps_the_style_it_was_found_in(self):
         """Matched as CRLF → written back as CRLF; the replacement is not smuggled in as LF."""
         path = self.make(self.ORIGINAL)
 
-        run_via_argv({"file": path, "old": "alpha\nlisten 80;",
-                      "new": "alpha\nlisten 8080;", "expected": 1})
+        run_via_argv({"file": path, "old": "alpha\nlisten 80;", "new": "alpha\nlisten 8080;", "expected": 1})
 
         self.assertIn(b"listen 8080;\r\n", self.bytes_of(path))
 
@@ -156,31 +149,30 @@ class TestMixedLineEndingsSurvive(EditCase):
         """
         path = self.make(self.ORIGINAL)
 
-        result = run_via_argv({"file": path, "old": "alpha\nlisten 80;",
-                               "new": "alpha\nlisten 8080;", "expected": 1})
+        result = run_via_argv({"file": path, "old": "alpha\nlisten 80;", "new": "alpha\nlisten 8080;", "expected": 1})
 
-        removed = [ln[1:] for ln in result["diff"].splitlines(keepends=True)
-                   if ln.startswith("-") and not ln.startswith("---")]
-        added = [ln[1:] for ln in result["diff"].splitlines(keepends=True)
-                 if ln.startswith("+") and not ln.startswith("+++")]
+        removed = [
+            ln[1:] for ln in result["diff"].splitlines(keepends=True) if ln.startswith("-") and not ln.startswith("---")
+        ]
+        added = [
+            ln[1:] for ln in result["diff"].splitlines(keepends=True) if ln.startswith("+") and not ln.startswith("+++")
+        ]
         after = self.ORIGINAL.decode("utf-8")
         for line in removed:
             after = after.replace(line, "", 1)
         self.assertEqual(added, ["listen 8080;\r\n"])
         self.assertEqual(removed, ["listen 80;\r\n"])
-        self.assertEqual(self.bytes_of(path).decode("utf-8"),
-                         after.replace("alpha\r\n", "alpha\r\n" + added[0], 1))
+        self.assertEqual(self.bytes_of(path).decode("utf-8"), after.replace("alpha\r\n", "alpha\r\n" + added[0], 1))
 
 
 # ── the matching itself (what the fix rewrote) ─────────────────────────────────
 
-class TestMatching(EditCase):
 
+class TestMatching(EditCase):
     def test_exact_match_needs_no_normalisation(self):
         path = self.make(b"listen 80;\n")
 
-        result = run_via_argv({"file": path, "old": "listen 80;",
-                               "new": "listen 8080;", "expected": 1})
+        result = run_via_argv({"file": path, "old": "listen 80;", "new": "listen 8080;", "expected": 1})
 
         self.assertEqual(result["status"], "ok", result)
         self.assertIs(result["normalized"], False)
@@ -189,8 +181,7 @@ class TestMatching(EditCase):
     def test_crlf_file_is_matched_by_an_lf_old(self):
         path = self.make(b"line one\r\nline two\r\n")
 
-        result = run_via_argv({"file": path, "old": "line one\nline two",
-                               "new": "replaced"})
+        result = run_via_argv({"file": path, "old": "line one\nline two", "new": "replaced"})
 
         self.assertEqual(result["status"], "ok", result)
         self.assertIs(result["normalized"], True)
@@ -200,8 +191,7 @@ class TestMatching(EditCase):
         """The other direction: the caller's clipboard had CRLF, the file does not."""
         path = self.make(b"line one\nline two\n")
 
-        result = run_via_argv({"file": path, "old": "line one\r\nline two",
-                               "new": "replaced"})
+        result = run_via_argv({"file": path, "old": "line one\r\nline two", "new": "replaced"})
 
         self.assertEqual(result["status"], "ok", result)
         self.assertIs(result["normalized"], True)
@@ -220,8 +210,7 @@ class TestMatching(EditCase):
         original = b"listen 80;\nlisten 80;\n"
         path = self.make(original)
 
-        result = run_via_argv({"file": path, "old": "listen 80;",
-                               "new": "listen 8080;", "expected": 1})
+        result = run_via_argv({"file": path, "old": "listen 80;", "new": "listen 8080;", "expected": 1})
 
         self.assertEqual(result["status"], "ambiguous", result)
         self.assertEqual(result["count"], 2)
@@ -230,8 +219,7 @@ class TestMatching(EditCase):
     def test_two_matches_expected_are_both_replaced(self):
         path = self.make(b"listen 80;\nlisten 80;\n")
 
-        result = run_via_argv({"file": path, "old": "listen 80;",
-                               "new": "listen 8080;", "expected": 2})
+        result = run_via_argv({"file": path, "old": "listen 80;", "new": "listen 8080;", "expected": 2})
 
         self.assertEqual(result["status"], "ok", result)
         self.assertEqual(self.bytes_of(path), b"listen 8080;\nlisten 8080;\n")
@@ -240,8 +228,7 @@ class TestMatching(EditCase):
         original = b"listen 80;\n"
         path = self.make(original)
 
-        result = run_via_argv({"file": path, "old": "listen 80;",
-                               "new": "listen 8080;", "dry_run": True})
+        result = run_via_argv({"file": path, "old": "listen 80;", "new": "listen 8080;", "dry_run": True})
 
         self.assertEqual(result["status"], "ok", result)
         self.assertEqual(result["new_sha"], sha256(b"listen 8080;\n"))
@@ -251,8 +238,7 @@ class TestMatching(EditCase):
         original = b"listen 80;\n"
         path = self.make(original)
 
-        result = run_via_argv({"file": path, "old": "listen 80;", "new": "listen 8080;",
-                               "base_sha": "a" * 64})
+        result = run_via_argv({"file": path, "old": "listen 80;", "new": "listen 8080;", "base_sha": "a" * 64})
 
         self.assertEqual(result["status"], "conflict", result)
         self.assertEqual(result["current_sha"], sha256(original))
@@ -262,8 +248,7 @@ class TestMatching(EditCase):
         """The CLI uses argv; a person at a terminal uses stdin. One behaviour."""
         path = self.make(b"# caf\xe9\nlisten 80;\n")
 
-        result = run_via_stdin({"file": path, "old": "listen 80;",
-                                "new": "listen 8080;", "expected": 1})
+        result = run_via_stdin({"file": path, "old": "listen 80;", "new": "listen 8080;", "expected": 1})
 
         self.assertEqual(result["status"], "ok", result)
         self.assertEqual(self.bytes_of(path), b"# caf\xe9\nlisten 8080;\n")
@@ -271,8 +256,8 @@ class TestMatching(EditCase):
 
 # ── the shape of the answer (what a caller reads to know what happened) ────────
 
-class TestEditHelperNotFound(EditCase):
 
+class TestEditHelperNotFound(EditCase):
     def test_hint_present_on_not_found(self):
         path = self.make(b"hello world\n")
         r = run_via_stdin({"file": path, "old": "MISSING_STRING", "new": "x"})
@@ -280,7 +265,6 @@ class TestEditHelperNotFound(EditCase):
 
 
 class TestEditHelperAmbiguous(EditCase):
-
     def setUp(self):
         super().setUp()
         self.path = self.make(b"foo\nfoo\nfoo\n")
@@ -300,7 +284,6 @@ class TestEditHelperAmbiguous(EditCase):
 
 
 class TestEditHelperOk(EditCase):
-
     def setUp(self):
         super().setUp()
         self.path = self.make(b"hello world\n")
@@ -329,27 +312,22 @@ class TestEditHelperOk(EditCase):
 
 
 class TestEditHelperDryRun(EditCase):
-
     def test_dry_run_returns_diff(self):
         path = self.make(b"alpha beta\n")
-        r = run_via_stdin({"file": path, "old": "alpha", "new": "CHANGED",
-                           "dry_run": True})
+        r = run_via_stdin({"file": path, "old": "alpha", "new": "CHANGED", "dry_run": True})
         self.assertIn("diff", r)
 
 
 class TestEditHelperConflict(EditCase):
-
     def test_conflict_includes_current_sha(self):
         path = self.make(b"content here\n")
-        r = run_via_stdin({"file": path, "old": "content", "new": "x",
-                           "base_sha": "0" * 64})
+        r = run_via_stdin({"file": path, "old": "content", "new": "x", "base_sha": "0" * 64})
         self.assertIn("current_sha", r)
         self.assertEqual(len(r["current_sha"]), 64)
 
     def test_correct_base_sha_allows_edit(self):
         path = self.make(b"content here\n")
-        r = run_via_stdin({"file": path, "old": "content", "new": "replaced",
-                           "base_sha": sha256(b"content here\n")})
+        r = run_via_stdin({"file": path, "old": "content", "new": "replaced", "base_sha": sha256(b"content here\n")})
         self.assertEqual(r["status"], "ok")
 
 

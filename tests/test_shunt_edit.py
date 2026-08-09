@@ -23,6 +23,7 @@ Coverage:
 
 ssh is stubbed; the helper is then run locally, which is exactly what it does remotely.
 """
+
 import base64
 import io
 import json
@@ -69,9 +70,11 @@ def payload_of(argv, stdin_payload=None):
         return MagicMock(returncode=0, stdout=b'{"status": "ok"}', stderr=b"")
 
     stdin = io.StringIO(json.dumps(stdin_payload) if stdin_payload else "")
-    with patch.object(shunt_mod.subprocess, "run", fake_run), \
-         patch.object(sys, "stdin", stdin), \
-         patch.object(sys, "stdout", io.StringIO()):
+    with (
+        patch.object(shunt_mod.subprocess, "run", fake_run),
+        patch.object(sys, "stdin", stdin),
+        patch.object(sys, "stdout", io.StringIO()),
+    ):
         shunt_mod.cmd_edit(argv)
     return json.loads(base64.b64decode(seen["argv"][-1]))
 
@@ -89,15 +92,14 @@ def edit_rc(argv, ssh_returncode=0):
     The helper decides the status; the test must not invent its answers — that is the
     whole point of an exit code that follows it. Returns (rc, what_was_printed).
     """
-    real_run = subprocess.run       # bound before the patch — the stub must not call itself
+    real_run = subprocess.run  # bound before the patch — the stub must not call itself
 
     def fake_run(a, *args, **kwargs):
         r = real_run([sys.executable, HELPER, a[-1]], capture_output=True)
         return MagicMock(returncode=ssh_returncode, stdout=r.stdout, stderr=r.stderr)
 
     printed = io.StringIO()
-    with patch.object(shunt_mod.subprocess, "run", fake_run), \
-         patch.object(sys, "stdout", printed):
+    with patch.object(shunt_mod.subprocess, "run", fake_run), patch.object(sys, "stdout", printed):
         rc = shunt_mod.cmd_edit(argv)
     return rc, printed.getvalue()
 
@@ -119,13 +121,12 @@ class TestStdinDryRun(unittest.TestCase):
 
     def test_stdin_with_dry_run_does_not_write(self):
         with TmpHosts():
-            payload = payload_of(["@h1", self.target, "--stdin", "--dry-run"],
-                                 self._stdin_payload())
+            payload = payload_of(["@h1", self.target, "--stdin", "--dry-run"], self._stdin_payload())
         result = apply_locally(payload)
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result.get("dry_run"))
         with open(self.target) as f:
-            self.assertEqual(f.read(), "listen 80;\n")      # untouched
+            self.assertEqual(f.read(), "listen 80;\n")  # untouched
 
     def test_the_same_payload_without_the_flag_does_write(self):
         """The control: without it the file changes, so the test above tests the flag."""
@@ -159,7 +160,7 @@ class TestExitCodeFollowsTheEdit(unittest.TestCase):
         with TmpHosts():
             rc, out = edit_rc(["@h1", self.target, "listen 443;", "listen 8443;"])
         self.assertNotEqual(rc, 0)
-        self.assertIn("not_found", out)          # and the reason is readable
+        self.assertIn("not_found", out)  # and the reason is readable
 
     def test_an_ambiguous_edit_returns_non_zero(self):
         with open(self.target, "w") as f:
@@ -172,24 +173,20 @@ class TestExitCodeFollowsTheEdit(unittest.TestCase):
     def test_a_dry_run_that_found_its_match_returns_zero(self):
         """A preview that worked is a success — it is not a refused edit."""
         with TmpHosts():
-            rc, _ = edit_rc(["@h1", self.target, "listen 80;", "listen 8080;",
-                             "--dry-run"])
+            rc, _ = edit_rc(["@h1", self.target, "listen 80;", "listen 8080;", "--dry-run"])
         self.assertEqual(rc, 0)
 
     def test_a_transport_failure_keeps_its_own_code(self):
         """ssh could not reach the machine: that code says more than a generic 1."""
         with TmpHosts():
-            rc, _ = edit_rc(["@h1", self.target, "listen 80;", "listen 8080;"],
-                            ssh_returncode=255)
+            rc, _ = edit_rc(["@h1", self.target, "listen 80;", "listen 8080;"], ssh_returncode=255)
         self.assertEqual(rc, 255)
 
 
 class TestFlagReachesThePayload(unittest.TestCase):
-
     def test_on_the_stdin_path(self):
         with TmpHosts():
-            payload = payload_of(["@h1", "/etc/x", "--stdin", "--dry-run"],
-                                 {"old": "a", "new": "b"})
+            payload = payload_of(["@h1", "/etc/x", "--stdin", "--dry-run"], {"old": "a", "new": "b"})
         self.assertIs(payload["dry_run"], True)
 
     def test_on_the_old_new_path(self):
@@ -205,25 +202,23 @@ class TestFlagReachesThePayload(unittest.TestCase):
     def test_a_payload_that_asks_for_a_preview_is_never_turned_into_a_write(self):
         """The flag may only ADD safety; its absence does not cancel the JSON's own."""
         with TmpHosts():
-            payload = payload_of(["@h1", "/etc/x", "--stdin"],
-                                 {"old": "a", "new": "b", "dry_run": True})
+            payload = payload_of(["@h1", "/etc/x", "--stdin"], {"old": "a", "new": "b", "dry_run": True})
         self.assertIs(payload["dry_run"], True)
 
 
 class TestStdinPayload(unittest.TestCase):
-
     def test_the_file_comes_from_the_argument(self):
         """The path is addressed on the command line — the JSON does not get to override."""
         with TmpHosts():
-            payload = payload_of(["@h1", "/etc/right", "--stdin"],
-                                 {"file": "/etc/wrong", "old": "a", "new": "b"})
+            payload = payload_of(["@h1", "/etc/right", "--stdin"], {"file": "/etc/wrong", "old": "a", "new": "b"})
         self.assertEqual(payload["file"], "/etc/right")
 
     def test_the_rest_of_the_payload_survives(self):
         with TmpHosts():
-            payload = payload_of(["@h1", "/etc/x", "--stdin", "--dry-run"],
-                                 {"old": "a", "new": "b", "expected": 3,
-                                  "base_sha": "deadbeef"})
+            payload = payload_of(
+                ["@h1", "/etc/x", "--stdin", "--dry-run"],
+                {"old": "a", "new": "b", "expected": 3, "base_sha": "deadbeef"},
+            )
         self.assertEqual(payload["expected"], 3)
         self.assertEqual(payload["base_sha"], "deadbeef")
 

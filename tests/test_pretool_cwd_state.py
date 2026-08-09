@@ -26,6 +26,7 @@ Coverage:
     it, `@local` clears it
   - the ControlMaster socket deliberately did NOT move (a local path, ~104 chars to live in)
 """
+
 import json
 import os
 import shutil
@@ -58,7 +59,7 @@ class FakeHome:
         return self
 
     def __exit__(self, *_):
-        os.chmod(self.home, 0o700)          # a read-only-home test must still clean up
+        os.chmod(self.home, 0o700)  # a read-only-home test must still clean up
         shutil.rmtree(self.root, ignore_errors=True)
 
     def dir(self):
@@ -72,10 +73,13 @@ class FakeHome:
         return subprocess.run(
             ["bash", "-c", pretool._remote_script(cmd, sid, switched)],
             env={"HOME": self.home, "PATH": os.environ.get("PATH", "/usr/bin:/bin")},
-            capture_output=True, text=True)
+            capture_output=True,
+            text=True,
+        )
 
 
 # ── the path itself ────────────────────────────────────────────────────────────
+
 
 class TestThePath(unittest.TestCase):
     """The three invariants are asserted on the SSH COMMAND, not only on the payload:
@@ -84,8 +88,7 @@ class TestThePath(unittest.TestCase):
 
     def _both(self, sid="sess-1"):
         """The payload and the full ssh command around it — both must hold."""
-        return (pretool._remote_script("ls", sid),
-                pretool.ssh_command(HOST, "ls", sid))
+        return (pretool._remote_script("ls", sid), pretool.ssh_command(HOST, "ls", sid))
 
     def test_the_state_moved_out_of_tmp(self):
         for text in self._both():
@@ -115,8 +118,7 @@ class TestThePath(unittest.TestCase):
     def test_the_script_is_valid_shell(self):
         for switched in (False, True):
             script = pretool._remote_script("echo hi", "sess-1", switched)
-            check = subprocess.run(["bash", "-n"], input=script,
-                                   capture_output=True, text=True)
+            check = subprocess.run(["bash", "-n"], input=script, capture_output=True, text=True)
             self.assertEqual(check.returncode, 0, check.stderr)
 
     def test_ssh_command_still_carries_the_script(self):
@@ -126,16 +128,16 @@ class TestThePath(unittest.TestCase):
         shapes, since the switch shape is the one with something to forget.
         """
         import shlex
+
         for switched in (False, True):
             cmd = pretool.ssh_command(HOST, "ls", "sess-1", switched)
-            self.assertIn(shlex.quote(pretool._remote_script("ls", "sess-1", switched)),
-                          cmd)
+            self.assertIn(shlex.quote(pretool._remote_script("ls", "sess-1", switched)), cmd)
 
 
 # ── what the far shell actually does with it ───────────────────────────────────
 
-class TestOnTheFarSide(unittest.TestCase):
 
+class TestOnTheFarSide(unittest.TestCase):
     def test_the_directory_is_created(self):
         with FakeHome() as h:
             h.run("true", "sess-mk")
@@ -196,7 +198,106 @@ class TestOnTheFarSide(unittest.TestCase):
             self.assertEqual(h.run("exit 7", "sess-rc2", switched=True).returncode, 7)
 
 
+# ── the restore has to say when it cannot land ─────────────────────────────────
+
+
+class TestTheRestoreSpeaksWhenItCannotLand(unittest.TestCase):
+    """`cd REMEMBERED || cd ~` is the textbook shape of a cd whose failure nobody looks
+    at, and on the next line an arbitrary command — the caller's own, which assumes it is
+    where it left off.
+
+    A directory removed on the far side between two commands (a release swapped, a build
+    tree cleaned) would move the next command to $HOME without a word: `rm -rf ./*` meant
+    for /srv/old-release would then run in a home directory. Said, never refused: the
+    session must stay usable when its remembered directory is swept.
+
+    The message says CANNOT BE ENTERED and offers two causes, because that is all that
+    was verified: cd fails the same way on a directory that is still there but has
+    become unreachable — permissions changed, a mount fell away. "is gone" would name a
+    cause nobody checked and send the reader looking in the wrong place.
+    """
+
+    def _gone(self, h, sid="sess-gone"):
+        """Point the state file at a directory that does not exist."""
+        os.makedirs(h.dir(), exist_ok=True)
+        with open(h.state(sid), "w") as f:
+            f.write(os.path.join(h.home, "release-42-removed") + "\n")
+
+    def test_a_vanished_directory_is_reported(self):
+        with FakeHome() as h:
+            self._gone(h)
+            out = h.run("pwd", "sess-gone")
+            self.assertIn("shunt:", out.stderr)
+
+    def test_the_report_names_the_directory(self):
+        """A report that cannot say WHICH directory is gone leaves the reader guessing."""
+        with FakeHome() as h:
+            self._gone(h)
+            out = h.run("pwd", "sess-gone")
+            self.assertIn("release-42-removed", out.stderr)
+
+    def test_the_command_still_runs(self):
+        """Warn, do not block — the far side has no way to ask, and a session whose cache
+        was swept must not stop working."""
+        with FakeHome() as h:
+            self._gone(h)
+            out = h.run("echo alive", "sess-gone")
+            self.assertEqual(out.stdout.strip(), "alive")
+
+    def test_where_it_ran_is_where_the_message_said(self):
+        with FakeHome() as h:
+            self._gone(h)
+            out = h.run("pwd", "sess-gone")
+            self.assertEqual(out.stdout.strip(), os.path.realpath(h.home))
+
+    def test_the_exit_code_is_still_the_command_s_own(self):
+        with FakeHome() as h:
+            self._gone(h)
+            self.assertEqual(h.run("exit 7", "sess-gone").returncode, 7)
+
+    def test_a_directory_that_is_there_says_nothing(self):
+        """The whole budget of this message: it fires on a real failure only. A line that
+        is always there stops being read."""
+        with FakeHome() as h:
+            h.run("cd /usr", "sess-fine")
+            second = h.run("pwd", "sess-fine")
+            self.assertEqual(second.stderr, "")
+            self.assertEqual(second.stdout.strip(), "/usr")
+
+    def test_a_directory_that_is_there_but_unreachable_is_reported_too(self):
+        """The case the wording exists for: it still EXISTS, cd still fails. A message
+        that said "is gone" would send the reader to look for a deleted directory."""
+        with FakeHome() as h:
+            walled = os.path.join(h.home, "walled-off")
+            os.makedirs(walled)
+            os.makedirs(h.dir(), exist_ok=True)
+            with open(h.state("sess-walled"), "w") as f:
+                f.write(walled + "\n")
+            os.chmod(walled, 0o000)
+            try:
+                out = h.run("pwd", "sess-walled")
+            finally:
+                os.chmod(walled, 0o700)  # or the temp tree cannot be removed
+            self.assertIn("walled-off", out.stderr)
+            self.assertIn("not accessible", out.stderr)
+            self.assertTrue(os.path.isdir(walled))  # it was there the whole time
+            self.assertEqual(out.stdout.strip(), os.path.realpath(h.home))
+
+    def test_the_message_does_not_claim_a_cause_it_did_not_check(self):
+        """Only the cd's failure is verified; which of the two reasons it was, is not."""
+        with FakeHome() as h:
+            self._gone(h)
+            self.assertNotIn("is gone", h.run("pwd", "sess-gone").stderr)
+
+    def test_the_helper_variable_does_not_leak_into_the_command(self):
+        """What follows is the caller's shell; it is not ours to leave things in."""
+        with FakeHome() as h:
+            out = h.run("echo [${__shunt_cwd-unset}]", "sess-leak")
+            self.assertIn("[unset]", out.stdout)
+
+
 # ── the id comes from outside ──────────────────────────────────────────────────
+
 
 class TestHostileSessionId(unittest.TestCase):
     """`session_id` arrives in the hook's stdin JSON; it is quoted for that reason."""
@@ -219,6 +320,7 @@ class TestHostileSessionId(unittest.TestCase):
 
 
 # ── the new failure the move brings with it ────────────────────────────────────
+
 
 class TestUnwritableHome(unittest.TestCase):
     """/tmp is always there; `~/.cache/shunt` has to be made, and making it can fail.
@@ -273,6 +375,7 @@ class TestUnwritableHome(unittest.TestCase):
 
 # ── the sweep: once per switch, never per command ──────────────────────────────
 
+
 class TestTheSweep(unittest.TestCase):
     """A session id is born and never dies. Without a sweep the directory grows one file
     per session forever; with one on every command it is a `find` over someone's disk,
@@ -323,6 +426,7 @@ class TestTheSweep(unittest.TestCase):
 
 # ── the one-shot marker, driven through the hook ───────────────────────────────
 
+
 class HookConf:
     """A temp SHUNT_CONF with one host, plus the session files the hook reads."""
 
@@ -338,6 +442,15 @@ class HookConf:
     def exists(self, name):
         return os.path.exists(os.path.join(self.dir, name))
 
+    def route_to(self, alias, sid="s1"):
+        with open(os.path.join(self.dir, "target." + sid), "w") as f:
+            f.write(alias)
+
+    def arm_switch(self, alias, sid="s1"):
+        """What `@alias` leaves behind: the one-shot marker the next command spends."""
+        with open(os.path.join(self.dir, "switched." + sid), "w") as f:
+            f.write(alias)
+
 
 def run_hook(conf, command, sid="s1"):
     """Run pretool.py exactly as the harness does. Returns the parsed hook output.
@@ -346,13 +459,10 @@ def run_hook(conf, command, sid="s1"):
     settings.json names pretool.py by absolute path, so the field never has the package
     on sys.path, and the test runner's PYTHONPATH would hide that.
     """
-    payload = {"tool_name": "Bash", "session_id": sid,
-               "tool_input": {"command": command}}
+    payload = {"tool_name": "Bash", "session_id": sid, "tool_input": {"command": command}}
     env = dict(os.environ, SHUNT_CONF=conf.dir)
     env.pop("PYTHONPATH", None)
-    r = subprocess.run([sys.executable, PRETOOL],
-                       input=json.dumps(payload).encode(),
-                       capture_output=True, env=env)
+    r = subprocess.run([sys.executable, PRETOOL], input=json.dumps(payload).encode(), capture_output=True, env=env)
     out = r.stdout.decode().strip()
     return json.loads(out)["hookSpecificOutput"] if out else {}
 
@@ -371,30 +481,69 @@ class TestTheSwitchMarkerLifecycle(unittest.TestCase):
             run_hook(c, "@h1")
             self.assertTrue(c.exists("switched.s1"))
 
-    def test_the_first_command_spends_it_and_the_second_carries_nothing(self):
-        """One question, two riders: the sweep and the probe ride the same one-shot fact."""
-        with HookConf() as c:
-            run_hook(c, "@h1")
-            first = run_hook(c, "ls")
-            self.assertIn("-delete", first["updatedInput"]["command"])
-            second = run_hook(c, "ls")
-            self.assertNotIn("-delete", second["updatedInput"]["command"])
-            self.assertFalse(c.exists("switched.s1"))
+    # The spend of the marker is driven ONE place only — see
+    # TestTheHookDoesNotWarnAboutItself.test_the_sweep_is_spent_with_the_switch_marker,
+    # where the note and the sweep are shown to be spent together. Two drivers for one
+    # fact in one file is knowledge kept twice.
 
     def test_going_local_clears_an_unspent_marker(self):
-        """There is no far machine left to keep house on. Left behind, it would be spent
-        by the first command of the NEXT switch — housekeeping on a host that never armed
-        it, and none on the one that did."""
+        """There is no far machine left to point at, or to keep house on. Left behind, it
+        would be spent by the first command of the NEXT switch — housekeeping on a host
+        that never armed it, and none on the one that did."""
         with HookConf() as c:
             run_hook(c, "@h1")
             run_hook(c, "@local")
             self.assertFalse(c.exists("switched.s1"))
 
 
+# ── the hook may not warn about a command the caller never wrote ───────────────
+
+
+class TestTheHookDoesNotWarnAboutItself(unittest.TestCase):
+    """The sweep is a `find … -delete` — a shape the hook's own irreversible-check reports.
+
+    It must never fire on it: the check reads the command the CALLER typed, never the
+    rewrite. A warning about a command nobody wrote is how a reader learns to skip the
+    lines that matter.
+    """
+
+    def test_a_harmless_command_after_a_switch_is_not_called_irreversible(self):
+        with HookConf() as c:
+            c.route_to("h1")
+            c.arm_switch("h1")
+            out = run_hook(c, "ls -la")
+            self.assertIn("-delete", out["updatedInput"]["command"])  # the sweep rode
+            context = out.get("additionalContext", "")
+            self.assertIn("first command since", context)  # the switch spoke
+            self.assertNotIn("cannot be taken back", context)
+
+    def test_the_check_is_still_alive(self):
+        """So the test above cannot pass by the warning being broken altogether."""
+        with HookConf() as c:
+            c.route_to("h1")
+            c.arm_switch("h1")
+            out = run_hook(c, "rm -rf /var/log/old")
+            self.assertIn("cannot be taken back", out.get("additionalContext", ""))
+
+    def test_the_sweep_is_spent_with_the_switch_marker(self):
+        """One question, two riders: the note and the sweep ride the same one-shot fact,
+        and the second command must carry neither. The marker itself is gone with them —
+        this is the one place the spend is driven (see TestTheSwitchMarkerLifecycle)."""
+        with HookConf() as c:
+            c.route_to("h1")
+            c.arm_switch("h1")
+            first = run_hook(c, "ls")
+            self.assertIn("-delete", first["updatedInput"]["command"])
+            out = run_hook(c, "ls")
+            self.assertNotIn("-delete", out["updatedInput"]["command"])
+            self.assertEqual(out.get("additionalContext"), None)
+            self.assertFalse(c.exists("switched.s1"))
+
+
 # ── what deliberately stayed behind ────────────────────────────────────────────
 
-class TestTheSocketDidNotMove(unittest.TestCase):
 
+class TestTheSocketDidNotMove(unittest.TestCase):
     def test_controlpath_is_still_in_tmp(self):
         """Pinned so a later sweep of /tmp does not take it along: this path is LOCAL,
         it is meant to die with the machine, and a unix socket has ~104 characters."""

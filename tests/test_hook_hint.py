@@ -10,6 +10,7 @@ Coverage:
   - the hint is a valid JSON fragment (it is copy-pasted into settings.json)
   - the hint points at THIS installation's pretool.py
 """
+
 import io
 import json
 import os
@@ -46,7 +47,7 @@ class TestHookHintMatchesReality(unittest.TestCase):
         """It is copy-pasted into settings.json — a broken quote breaks every hook there."""
         hint = self._hint()
         start = hint.index("{")
-        json.loads(hint[start:hint.rindex("}") + 1])   # raises if malformed
+        json.loads(hint[start : hint.rindex("}") + 1])  # raises if malformed
 
     def test_hint_points_at_this_installation(self):
         self.assertIn(shunt_mod.SELF_DIR, self._hint())

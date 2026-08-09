@@ -5,6 +5,174 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
+## [2026080920] — 2026-08-09
+
+Most of this release is the hook learning to say **where a command actually went** — and
+refusing when it cannot say. Several things that used to happen in silence are now loud,
+and six of them change behaviour you may have relied on; each is marked ⚠. Two ask
+something of you: the session's remote working directory moves and **is not migrated**,
+and a `shunt …` line with a `;` in it is refused while the session is remote. Scripts
+reading exit codes should read the entries for `bg --stop`, the checkout manifest, `log
+-n` and `bg --name` — all four changed one.
+
+### Changed
+
+- **The session's remote working directory is remembered in
+  `$HOME/.cache/shunt/cwd-<session-id>`** on the far host, no longer
+  `/tmp/shunt-cwd-<session-id>`. ⚠ **Behaviour change**, and **nothing is migrated**: the
+  first command after upgrading starts in the ssh login directory (usually `$HOME`)
+  instead of where you left off — once per session, per host, per account. `cd` again and
+  the new file takes over. It happens without a message, because a missing state file is
+  also what a brand-new session looks like; there is nothing wrong to report.
+
+  **Why:** `/tmp` is shared, and the path carried only the session id. Two accounts on one
+  machine — `deploy@web-01` and `root@web-01`, which the config allows — reached for the
+  same file, so one of them read the *other's* working directory or failed to write its
+  own without a word. `$HOME/.cache` is per-account by construction; the directory is
+  created `mkdir -m 700`. The old `/tmp/shunt-cwd-*` files are not read, not moved and not
+  deleted — they are orphans now, and `/tmp` clears them in its own time.
+
+  Two smaller things ride along. shunt sweeps `cwd-*` files older than 30 days out of that
+  directory on the first command after a switch — nothing outside that name is touched.
+  And if the directory cannot be written, it says so once instead of losing every `cd`
+  from then on in silence:
+
+  ```
+  shunt: cannot write /home/you/.cache/shunt - this session will not remember its
+  working directory (every command starts at $HOME)
+  ```
+
+### Added
+
+- **A warning before a command that cannot be taken back.** While a session is on a host,
+  a line running `rm`, `rmdir`, `mv`, `dd`, `shred`, `truncate`, `mkfs*`, `wipefs`,
+  `reboot`, `poweroff`, `halt` or `shutdown`, a recursive `chown -R` / `chmod -R`, a
+  `find … -delete`, a `git clean` or `git … --hard`, a `docker rm` / `rmi` / `prune`, or a
+  `>` that truncates a file, now arrives with a line naming the machine:
+
+  ```
+  ⚠ shunt: you are on @web-01 — this runs THERE and cannot be taken back: git … --hard,
+  docker … rm. Check which machine you meant; `@local` first if it is this one.
+  ```
+
+  It **warns and runs**: nothing is blocked and no exit code changes. **Why:** every other
+  guard here answers "which machine am I on?" when you ask it. This one answers when you
+  do not ask, at the one moment the answer is expensive. And unlike the warnings that
+  speak once per session, this one speaks **every time** — a destructive command is not a
+  state you should get used to.
+
+  `> /dev/null` and its variants are excluded; redirecting into the bin truncates nothing
+  that matters. A shell comparison like `[[ $a > $b ]]` will still trip it — on a warning
+  that costs one line of text, the false alarm is the safer side to be wrong on. The
+  warning travels in the **same** hook response as the redirected command, which is a
+  shape the hook did not emit before: `additionalContext` and `updatedInput` together.
+
+- **A reminder on the first command after `@<alias>`:**
+
+  ```
+  ℹ shunt: first command since `@web-01` — it runs THERE, not here. (said once per switch)
+  ```
+
+  The switch is a line you type and forget; the command after it is where believing you
+  are still at home does its damage. It is spent on that first command and does not come
+  back until you switch again. A new file, `switched.<session-id>`, holds it next to
+  `target.<session-id>` in `~/.config/shunt/`.
+
+- **A working directory that has gone away now says so** — `shunt: /srv/release-42 cannot
+  be entered (gone or not accessible); running in $HOME instead`. The fallback to `$HOME`
+  is unchanged; it simply used to be silent, so a command written for one directory ran in
+  another and returned perfectly ordinary output from the wrong place.
+
+### Fixed
+
+- **A `shunt …` line with something after it is refused while the session is remote.** ⚠
+  **Behaviour change.** `shunt …` runs on *this* machine — that is what it is for — but so
+  did everything past the `;`, and that part never asked to. On a session routed to a
+  server, `shunt hosts; rm -rf /var/log/*` deleted the **local** log directory without a
+  word, because the whole line was handed back unrewritten. A line beginning with `shunt`
+  that also contains `;`, `&`, `|`, a backtick, `$`, `(` or a newline now runs nothing and
+  says why.
+
+  The cost is real and belongs here: legitimate one-liners go with it. `shunt run @web-01
+  "systemctl status nginx | head"` is refused while the session is remote, and so is
+  `shunt edit @host f "a" "b;c"` — the separator is looked for in the raw text, inside
+  quotes included. Send the `shunt …` part as its own command (it runs here in any mode)
+  and the rest as another, or `@local` first if the whole line was meant for this machine.
+  A plain redirect is not in the class, so `shunt read @host /etc/nginx.conf > local.txt`
+  still works.
+
+- **A routing file that cannot be read is refused, not read as "local".** ⚠ **Behaviour
+  change.** `target.<session-id>` had two readings — a host, or nothing — and a file that
+  was empty, truncated, a directory or unreadable counted as *nothing*, which means
+  **local**. A session that had been routed away therefore came home without saying so,
+  and `@status` confirmed `LOCAL` with a straight face. There is a third reading now: bash
+  runs nothing and names the file, `@status` answers `UNKNOWN`, and the file tools warn
+  once that they are reading the local disk either way. `@local` to be local on purpose,
+  or `@<alias>` to route again.
+
+  A half-typed alias is *not* this state — `@web` for `@web-01` is refused at the switch
+  itself (`[shunt] unknown host: web`) and the routing file is left untouched. The file is
+  also written atomically now (temporary file, then rename), so an interrupted switch can
+  no longer leave behind the empty file this entry is about.
+
+- **A switch that fails says so, instead of failing quietly or lying.** A read-only config
+  directory made `@web-02` exit without a word — the session stayed where it was while you
+  believed it had moved — and `@local` printed `[shunt] mode: LOCAL` unconditionally,
+  including when it had just failed to remove the file that keeps you remote. Both now
+  report the failure and, more usefully, where you actually are:
+
+  ```
+  [shunt] switch to @web-02 FAILED — could not write
+  /home/you/.config/shunt/target.s1 (Permission denied). Nothing changed; the session is
+  STILL on @web-01. Fix that and try `@web-02` again.
+  ```
+
+  ⚠ The atomic write brings one new failure mode: switching now needs a **writable config
+  directory**, not merely a writable file, because the temporary file is created beside the
+  target. It fails loudly, in the shape above. On the other side, an *empty* directory
+  sitting where `target.<session-id>` belongs is now removed rather than being a trap with
+  no way out — bash refused, and `@local` was powerless to lift it.
+
+- **`shunt bg --stop` reports what systemd actually did.** ⚠ **Behaviour change** for
+  anything reading its exit code. The stop and the `echo` were joined by `;`, so `stopped`
+  was printed and `0` returned no matter what happened — a mistyped unit name answered
+  exactly like a real one while the job kept running. `stopped <job>` is now printed only
+  on success, and systemctl's own message and exit code come back otherwise. Stopping a
+  job twice is one of those failures: `systemd-run --collect` discards the unit when it
+  ends, so the second `--stop` gets `Unit … not loaded.` and exit **5**.
+
+- **A checkout manifest that cannot be read stops the operation.** ⚠ **Behaviour change.**
+  Every read of it caught every exception and returned an empty manifest — and an empty
+  manifest means "nothing is checked out" further down. So a corrupt file made `checkout
+  --list` print `(no checkouts)`, and `commit` say `no checkouts in manifest` and exit
+  `0`, while the file recording every checkout's `base_sha` sat there unreadable. It now
+  exits `2` and names the parse error:
+
+  ```
+  shunt: cannot read the checkout manifest
+  /home/you/.config/shunt/checkouts/manifest.json: Expecting property name enclosed in
+  double quotes: line 1 column 2 (char 1)
+    it holds every checkout's base_sha, so nothing is listed, committed or checked out
+    until it can be read (move it aside to start over — the local files stay where they
+    are).
+  ```
+
+  Valid JSON of the wrong shape goes through the same door: `null` used to pass for
+  "empty" and a list crashed with a traceback.
+
+- **A `checkout` that meets a corrupt manifest no longer overwrites your local file
+  first.** The manifest was loaded *after* the fetched copy had been moved into place, so
+  the refusal above arrived having already destroyed the local edits it went on to claim
+  it had left alone. It is read before anything is fetched: the file, the manifest and the
+  absence of a stray `.part` beside it are all left exactly as they were.
+
+- **`shunt log -n` and `shunt bg --name` refuse a value they cannot use.** ⚠ **Behaviour
+  change**; both exit `2` and do nothing. An unparseable `-n` was swallowed and fell back
+  to **50** records — and fifty records look like a complete answer, which is how someone
+  concludes that a command was never sent to a server at all. `--name` with no label left
+  the flag in the command, so `shunt bg @host "deploy.sh" --name` sent `deploy.sh --name`
+  to the far machine and ran it.
+
 ## [2026080707] — 2026-08-07
 
 ### Added

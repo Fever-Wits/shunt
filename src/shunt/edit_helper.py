@@ -21,6 +21,7 @@ Output (JSON, status):
   conflict  → {status, current_sha, base_sha}         (optimistic SHA-256 lock)
   error     → {status, message}
 """
+
 import difflib
 import hashlib
 import json
@@ -57,15 +58,16 @@ def display_lines(b: bytes):
 
 def main():
     try:
-        if len(sys.argv) > 1:                       # inline deployment: JSON as base64 argv
+        if len(sys.argv) > 1:  # inline deployment: JSON as base64 argv
             import base64
+
             req = json.loads(base64.b64decode(sys.argv[1]))
-        else:                                        # local/interactive: JSON from stdin
+        else:  # local/interactive: JSON from stdin
             req = json.load(sys.stdin)
     except Exception as e:
         return out({"status": "error", "message": f"bad request: {e}"})
 
-    path = os.path.realpath(req.get("file", ""))   # resolve symlink → edit the target, not the link;
+    path = os.path.realpath(req.get("file", ""))  # resolve symlink → edit the target, not the link;
     # resolved_path is included in responses so the caller can see what was actually edited
     old = req.get("old", "")
     new = req.get("new", "")
@@ -78,27 +80,34 @@ def main():
     try:
         st0 = os.stat(path)
     except Exception as e:
-        return out({"status": "error", "message": f"stat failed: {e}",
-                    "resolved_path": path})
+        return out({"status": "error", "message": f"stat failed: {e}", "resolved_path": path})
     MAX = int(os.environ.get("SHUNT_EDIT_MAX_BYTES", str(64 * 1024 * 1024)))
     if st0.st_size > MAX:
-        return out({"status": "error",
-                    "message": f"file too large ({st0.st_size} bytes > limit {MAX}); "
-                               "use shunt cp + local edit",
-                    "resolved_path": path})
+        return out(
+            {
+                "status": "error",
+                "message": f"file too large ({st0.st_size} bytes > limit {MAX}); use shunt cp + local edit",
+                "resolved_path": path,
+            }
+        )
     try:
         with open(path, "rb") as f:
             raw = f.read()
     except Exception as e:
-        return out({"status": "error", "message": f"read failed: {e}",
-                    "resolved_path": path})
+        return out({"status": "error", "message": f"read failed: {e}", "resolved_path": path})
 
     cur_sha = sha256(raw)
     # optimistic lock: was the file touched between my read and this write?
     if base_sha and base_sha != cur_sha:
-        return out({"status": "conflict", "current_sha": cur_sha, "base_sha": base_sha,
-                    "hint": "the file has changed; re-read and try again",
-                    "resolved_path": path})
+        return out(
+            {
+                "status": "conflict",
+                "current_sha": cur_sha,
+                "base_sha": base_sha,
+                "hint": "the file has changed; re-read and try again",
+                "resolved_path": path,
+            }
+        )
 
     # Match and replace on BYTES, like the sibling write_helper.py. Decoding the file to
     # text and writing that text back is how a helper that answers `ok` destroys a file:
@@ -117,27 +126,45 @@ def main():
             break
 
     if count == 0:
-        return out({"status": "not_found",
-                    "hint": "old not found (tried as given, all-LF and all-CRLF); add "
-                            "unique context, or check the file is UTF-8",
-                    "resolved_path": path})
+        return out(
+            {
+                "status": "not_found",
+                "hint": "old not found (tried as given, all-LF and all-CRLF); add "
+                "unique context, or check the file is UTF-8",
+                "resolved_path": path,
+            }
+        )
     if count != expected:
-        return out({"status": "ambiguous", "count": count, "expected": expected,
-                    "hint": "add surrounding context for uniqueness",
-                    "resolved_path": path})
+        return out(
+            {
+                "status": "ambiguous",
+                "count": count,
+                "expected": expected,
+                "hint": "add surrounding context for uniqueness",
+                "resolved_path": path,
+            }
+        )
 
     new_bytes = raw.replace(o, n)
     # The diff is computed from the bytes on disk and the bytes about to be written —
     # decoded only for display. Computed from anything else it can HIDE a change: it
     # once showed one edited line while the whole file was being converted to CRLF.
-    diff = "".join(difflib.unified_diff(
-        display_lines(raw), display_lines(new_bytes),
-        fromfile=path, tofile=path + " (edited)"))
+    diff = "".join(
+        difflib.unified_diff(display_lines(raw), display_lines(new_bytes), fromfile=path, tofile=path + " (edited)")
+    )
 
     if dry:
-        return out({"status": "ok", "dry_run": True, "count": count,
-                    "new_sha": sha256(new_bytes), "diff": diff, "normalized": normalized,
-                    "resolved_path": path})
+        return out(
+            {
+                "status": "ok",
+                "dry_run": True,
+                "count": count,
+                "new_sha": sha256(new_bytes),
+                "diff": diff,
+                "normalized": normalized,
+                "resolved_path": path,
+            }
+        )
 
     # atomic write: temp in the SAME directory + fsync(data) + rename + fsync(dir)
     d = os.path.dirname(path) or "."
@@ -155,7 +182,7 @@ def main():
             os.chown(tmp, st.st_uid, st.st_gid)
         except Exception:
             pass
-        os.replace(tmp, path)                       # atomic on the same filesystem
+        os.replace(tmp, path)  # atomic on the same filesystem
         tmp = None
         dfd = os.open(d, os.O_RDONLY)
         try:
@@ -164,17 +191,25 @@ def main():
             os.close(dfd)
     except Exception as e:
         if tmp:
-            try: os.unlink(tmp)
-            except Exception: pass
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
         return out({"status": "error", "message": f"write failed: {e}"})
 
     # verify-after-write (our niche — no SSH MCP does this)
     with open(path, "rb") as f:
         vsha = sha256(f.read())
-    ok = (vsha == sha256(new_bytes))
-    res = {"status": "ok" if ok else "error", "count": count, "new_sha": vsha,
-           "verified": ok, "diff": diff, "normalized": normalized,
-           "resolved_path": path}
+    ok = vsha == sha256(new_bytes)
+    res = {
+        "status": "ok" if ok else "error",
+        "count": count,
+        "new_sha": vsha,
+        "verified": ok,
+        "diff": diff,
+        "normalized": normalized,
+        "resolved_path": path,
+    }
     if not ok:
         res["message"] = "verify mismatch after write"
     out(res)

@@ -30,6 +30,7 @@ The hook is run as the harness runs it — a subprocess fed JSON on stdin, start
 with PYTHONPATH stripped — and SHUNT_CONF points at a temp directory, so no real config or
 session state is touched.
 """
+
 import json
 import os
 import shutil
@@ -48,8 +49,7 @@ PRETOOL = pretool.__file__
 
 # The two lines the audit ran against a live remote session. Both exited silently, which
 # meant both had just run — here, in full.
-AUDIT_CASES = ("shunt hosts; rm -rf /var/log/*",
-               "shunt log -n 3 && rm -rf ./build")
+AUDIT_CASES = ("shunt hosts; rm -rf /var/log/*", "shunt log -n 3 && rm -rf ./build")
 
 
 class HookConf:
@@ -81,13 +81,10 @@ def run_hook(conf, command, sid="s1"):
     settings.json names pretool.py by absolute path, so the field never has the package on
     sys.path, and the test runner's PYTHONPATH would hide that.
     """
-    payload = {"tool_name": "Bash", "session_id": sid,
-               "tool_input": {"command": command}}
+    payload = {"tool_name": "Bash", "session_id": sid, "tool_input": {"command": command}}
     env = dict(os.environ, SHUNT_CONF=conf.dir)
     env.pop("PYTHONPATH", None)
-    r = subprocess.run([sys.executable, PRETOOL],
-                       input=json.dumps(payload).encode(),
-                       capture_output=True, env=env)
+    r = subprocess.run([sys.executable, PRETOOL], input=json.dumps(payload).encode(), capture_output=True, env=env)
     return r.returncode, r.stdout.decode()
 
 
@@ -104,15 +101,14 @@ def ran_instead(stdout):
 
 # ── the two lines the audit proved ─────────────────────────────────────────────
 
-class TestTheTwoProvenCases(unittest.TestCase):
 
+class TestTheTwoProvenCases(unittest.TestCase):
     def _refusal(self, line):
         with HookConf() as c:
             c.route_to("h1")
             code, out = run_hook(c, line)
             said = ran_instead(out)
-            self.assertIsNotNone(
-                said, "the hook said nothing — which means this line ran, here, whole")
+            self.assertIsNotNone(said, "the hook said nothing — which means this line ran, here, whole")
             return code, said
 
     def test_neither_is_let_through(self):
@@ -155,6 +151,7 @@ class TestTheTwoProvenCases(unittest.TestCase):
 
 # ── the whole class, not the two instances ─────────────────────────────────────
 
+
 class TestEverySeparatorThatCanBeginACommand(unittest.TestCase):
     """`;` and `&&` were the two that were tried. The check is written against the class:
     anything that can put a second command on the line."""
@@ -178,20 +175,22 @@ class TestEverySeparatorThatCanBeginACommand(unittest.TestCase):
             with self.subTest(separator=name), HookConf() as c:
                 c.route_to("h1")
                 _, out = run_hook(c, line)
-                self.assertIsNotNone(ran_instead(out),
-                                     f"{name} got through: the line ran here, whole")
+                self.assertIsNotNone(ran_instead(out), f"{name} got through: the line ran here, whole")
 
 
 # ── what must keep working ─────────────────────────────────────────────────────
 
+
 class TestASingleShuntCommandStillRunsHere(unittest.TestCase):
     """The reason the branch exists at all — it must not become collateral damage."""
 
-    PLAIN = ("shunt",
-             "shunt hosts",
-             "shunt log -n 3",
-             "shunt read @h1 /etc/hosts",
-             'shunt run @h1 "grep -rn PATTERN /path"')
+    PLAIN = (
+        "shunt",
+        "shunt hosts",
+        "shunt log -n 3",
+        "shunt read @h1 /etc/hosts",
+        'shunt run @h1 "grep -rn PATTERN /path"',
+    )
 
     def test_they_pass_through_untouched_in_remote_mode(self):
         for line in self.PLAIN:
@@ -219,6 +218,7 @@ class TestALocalSessionIsLeftAlone(unittest.TestCase):
 
 
 # ── what the refusal says ──────────────────────────────────────────────────────
+
 
 class TestWhatTheRefusalSays(unittest.TestCase):
     """A refusal that does not carry its way out is a wall. The false positives of a check
@@ -251,6 +251,7 @@ class TestWhatTheRefusalSays(unittest.TestCase):
 
 
 # ── the routing state this branch cannot read ──────────────────────────────────
+
 
 class TestAnUnreadableRoutingState(unittest.TestCase):
     """The third state of `target.<sid>` reaches this branch as well. It is not "local",

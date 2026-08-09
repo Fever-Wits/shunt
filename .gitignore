@@ -5,6 +5,8 @@ shunt.toml
 hosts
 target.*
 active-host.*
+switched.*
+warned.*
 *.sock
 audit.log
 *.env

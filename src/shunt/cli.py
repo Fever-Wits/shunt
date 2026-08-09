@@ -34,6 +34,7 @@ session last `cd`-ed.
 hosts (~/.config/shunt/shunt.toml): see config.py — the legacy `hosts` file is still
 read when no shunt.toml exists. Everything goes through ssh, the only transport.
 """
+
 import base64
 import hashlib
 import json
@@ -100,9 +101,18 @@ def ssh_opts(host):
     opts = []
     if host["key"]:
         opts += ["-i", host["key"]]
-    opts += ["-o", "StrictHostKeyChecking=accept-new", "-o", "ControlMaster=auto",
-             "-o", "ControlPath=" + SOCK, "-o", "ControlPersist=300",
-             "-o", "BatchMode=yes"]
+    opts += [
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "ControlMaster=auto",
+        "-o",
+        "ControlPath=" + SOCK,
+        "-o",
+        "ControlPersist=300",
+        "-o",
+        "BatchMode=yes",
+    ]
     return opts
 
 
@@ -204,8 +214,7 @@ def cmd_read(argv):
     f = argv[1]
     if len(argv) > 2 and ":" in argv[2]:
         a, b = argv[2].split(":", 1)
-        remote = (f"awk 'NR>={int(a)} && NR<={int(b)}{{printf \"%6d\\t%s\\n\", NR, $0}}' "
-                  f"{shlex.quote(f)}")
+        remote = f"awk 'NR>={int(a)} && NR<={int(b)}{{printf \"%6d\\t%s\\n\", NR, $0}}' {shlex.quote(f)}"
     else:
         remote = f"cat -n -- {shlex.quote(f)}"
     return subprocess.run(ssh_argv(host) + [remote]).returncode
@@ -233,24 +242,21 @@ def cmd_edit(argv):
         if "--expected" in rest:
             i = rest.index("--expected")
             expected = int(rest[i + 1])
-            rest = rest[:i] + rest[i + 2:]
+            rest = rest[:i] + rest[i + 2 :]
         if len(rest) < 2:
             die("usage: shunt edit @host <file> OLD NEW [--expected N] [--dry-run]")
-        payload = {"file": f, "old": rest[0], "new": rest[1],
-                   "expected": expected, "dry_run": dry}
-    audit_cli("edit", host["alias"],
-              f + (" (dry-run)" if payload.get("dry_run") else ""))
+        payload = {"file": f, "old": rest[0], "new": rest[1], "expected": expected, "dry_run": dry}
+    audit_cli("edit", host["alias"], f + (" (dry-run)" if payload.get("dry_run") else ""))
     b64 = base64.b64encode(json.dumps(payload).encode()).decode()
     with open(HELPER, "rb") as _hf:
         helper_src = _hf.read()
     # inline deployment: helper source via stdin (python3 -), JSON as base64 argv
-    r = subprocess.run(ssh_argv(host) + ["python3", "-", b64], input=helper_src,
-                       capture_output=True)
+    r = subprocess.run(ssh_argv(host) + ["python3", "-", b64], input=helper_src, capture_output=True)
     raw_out = (r.stdout or b"").decode("utf-8", "replace")
-    sys.stdout.write(raw_out)                   # the helper's JSON is the answer — verbatim
+    sys.stdout.write(raw_out)  # the helper's JSON is the answer — verbatim
     sys.stderr.write((r.stderr or b"").decode("utf-8", "replace"))
     if r.returncode != 0:
-        return r.returncode                     # the transport itself failed
+        return r.returncode  # the transport itself failed
     # The exit code must mean what a caller reads it to mean. The helper answers in JSON
     # and always exits 0 — `not_found`, `ambiguous`, `conflict` included — so passing ssh's
     # code straight back made `shunt edit … && deploy` deploy an unchanged file. Read the
@@ -258,7 +264,7 @@ def cmd_edit(argv):
     try:
         result = json.loads(raw_out.strip())
     except Exception:
-        return 1                                # an answer that is not the helper's
+        return 1  # an answer that is not the helper's
     return 0 if result.get("status") == "ok" else 1
 
 
@@ -300,33 +306,51 @@ def cmd_bg(argv):
         if len(rest) < 2:
             die("usage: shunt bg @host --status JOB")
         job = shlex.quote(rest[1])
-        remote = (f"journalctl -u {job} --no-pager -n 60 2>/dev/null; echo '----'; "
-                  f"systemctl show {job} -p ExecMainStatus -p ExecMainCode -p Result -p SubState")
+        remote = (
+            f"journalctl -u {job} --no-pager -n 60 2>/dev/null; echo '----'; "
+            f"systemctl show {job} -p ExecMainStatus -p ExecMainCode -p Result -p SubState"
+        )
         return subprocess.run(sa + [remote]).returncode
     if rest[0] == "--stop":
         if len(rest) < 2:
             die("usage: shunt bg @host --stop JOB")
         job = shlex.quote(rest[1])
-        remote = f"systemctl stop {job}; systemctl reset-failed {job} 2>/dev/null; echo stopped"
+        # `&&`, not `;`: the word "stopped" and the exit code are the only things the
+        # caller has, and both used to be produced by the `echo` no matter what systemctl
+        # did — a mistyped unit answered "stopped", exit 0, while the job kept running.
+        # Nothing may be stated that has not been verified. systemctl's own stderr already
+        # says why it failed; what was missing was not saying so.
+        # `reset-failed` stays fire-and-forget INSIDE the success branch — it is cleanup
+        # after a stop that happened, and nothing reads its result.
+        remote = f"systemctl stop {job} && {{ systemctl reset-failed {job} 2>/dev/null; echo stopped {job}; }}"
         return subprocess.run(sa + [remote]).returncode
     # start: system-level — survives disconnect, preserves exit code
     # optional --name LABEL for a human-readable unit name
     import re as _re
+
     label = None
     if "--name" in rest:
         ni = rest.index("--name")
-        if ni + 1 < len(rest):
-            label = rest[ni + 1]
-            rest = rest[:ni] + rest[ni + 2:]
+        if ni + 1 >= len(rest):
+            # A flag with no value used to be left where it stood and joined the command
+            # by ` `.join below — so `shunt bg @h "deploy.sh" --name` shipped
+            # `deploy.sh --name` to the far machine. The two hands above (--status,
+            # --stop) already refuse a flag without its argument; this one fell to a
+            # default instead, and the default was a command nobody typed.
+            die("usage: shunt bg @host <cmd> [--name LABEL]   (--name needs a label)")
+        label = rest[ni + 1]
+        rest = rest[:ni] + rest[ni + 2 :]
     cmd = " ".join(rest)
     if label:
         label = _re.sub(r"[^a-z0-9-]", "-", label.lower()).strip("-")
-    if label:                                   # empty/all-illegal label → random
+    if label:  # empty/all-illegal label → random
         unit = "shunt-" + label
     else:
         unit = "shunt-" + base64.b16encode(os.urandom(4)).decode().lower()
-    remote = (f"systemd-run --collect --remain-after-exit --unit={unit} bash -lc {shlex.quote(cmd)} "
-              f">/dev/null && echo 'JOB={unit}'")
+    remote = (
+        f"systemd-run --collect --remain-after-exit --unit={unit} bash -lc {shlex.quote(cmd)} "
+        f">/dev/null && echo 'JOB={unit}'"
+    )
     return subprocess.run(sa + [remote]).returncode
 
 
@@ -347,9 +371,14 @@ def cmd_log(argv):
         i = rest.index("-n")
         try:
             n = int(rest[i + 1])
-            rest = rest[:i] + rest[i + 2:]
         except (IndexError, ValueError):
-            pass
+            # Falling back to 50 answered a question nobody asked: `-n 5OO` (letter O)
+            # printed fifty records with no word, and fifty records that LOOK like the
+            # whole answer are how someone concludes a command was never run on a server —
+            # the reader acts confidently in the wrong direction. The log is the thing
+            # people bring hard questions to; it may not quietly narrow them.
+            die("usage: shunt log [-n N]   (-n needs a number)")
+        rest = rest[:i] + rest[i + 2 :]
     log_path = os.path.join(CONF, "audit.log")
     try:
         with open(log_path) as f:
@@ -361,7 +390,7 @@ def cmd_log(argv):
         sys.stderr.write(f"shunt: cannot read audit log: {e}\n")
         return 1
     records = pretool.log_records(lines)
-    n = abs(n)                                  # negative -n → last |n| (not a bad slice)
+    n = abs(n)  # negative -n → last |n| (not a bad slice)
     shown = records[-n:] if n else []
     sys.stdout.writelines(pretool.log_text(rec) for rec in shown)
     return 0
@@ -375,9 +404,11 @@ def cmd_get(argv):
     dest = argv[2] if len(argv) > 2 else "."
     audit_cli("get", host["alias"], f"{url} -> {dest}")
     log = f"/tmp/shunt-wget-{base64.b16encode(os.urandom(3)).decode().lower()}.log"
-    remote = (f"cd {shlex.quote(dest)} && wget -b -o {shlex.quote(log)} {shlex.quote(url)} && "
-              f"echo 'downloading in background; progress: shunt read @{host['alias']} "
-              f"{shlex.quote(log)} or tail -f {shlex.quote(log)}'")
+    remote = (
+        f"cd {shlex.quote(dest)} && wget -b -o {shlex.quote(log)} {shlex.quote(url)} && "
+        f"echo 'downloading in background; progress: shunt read @{host['alias']} "
+        f"{shlex.quote(log)} or tail -f {shlex.quote(log)}'"
+    )
     return subprocess.run(ssh_argv(host) + [remote]).returncode
 
 
@@ -440,6 +471,7 @@ def cmd_install(argv):
 
 # ── checkout / commit helpers ─────────────────────────────────────────────────
 
+
 def _sha256_file(path):
     """sha256 of local file bytes, or None if the file does not exist."""
     try:
@@ -450,12 +482,43 @@ def _sha256_file(path):
 
 
 def _manifest_load():
-    """Load manifest dict; returns {} if missing/corrupt."""
+    """The checkouts; {} when there are none — and a REFUSAL when they cannot be read.
+
+    Missing and unreadable used to come back as the same {}, and everything downstream
+    takes {} to MEAN "nothing is checked out" and acts on it:
+      · `checkout --list` prints "(no checkouts)" — the one answer it has not verified;
+      · `commit` prints "no checkouts in manifest" and exits 0, while edited files sit
+        unpushed and a script reading that code carries on as if they had landed;
+      · the next `checkout` writes the file back with ONE entry, taking every other
+        entry's base_sha with it — and base_sha is the whole of what makes a commit
+        conflict-safe. The damage is done by the recovery attempt.
+    So the failure falls to refusal, never to the default, the way load_hosts() already
+    refuses a config it cannot read: a state file we cannot read is not a state we may
+    guess at.
+
+    Parsing is not reading, which is how `null` walked past all of that: it parses
+    cleanly, lands on None, and None is FALSY — so it reached the very "no checkouts,
+    exit 0" answer above without the guard ever being asked. `[]` takes that same path;
+    a non-empty list or a string takes the other one and reaches `m.keys()` as a bare
+    traceback. Both are one fact — this file is not a mapping of checkouts — so both
+    fall to the same refusal rather than to a second, half-shaped one.
+    """
     try:
         with open(MANIFEST) as f:
-            return json.load(f)
-    except Exception:
-        return {}
+            m = json.load(f)
+        if not isinstance(m, dict):
+            found = "null" if m is None else type(m).__name__  # the word the FILE uses
+            raise ValueError(f"expected an object of checkouts, found {found}")
+        return m
+    except FileNotFoundError:
+        return {}  # nothing checked out yet — the ordinary empty state
+    except Exception as e:
+        die(
+            f"cannot read the checkout manifest {MANIFEST}: {e}\n"
+            "  it holds every checkout's base_sha, so nothing is listed, committed or "
+            "checked out until it can be read (move it aside to start over — the local "
+            "files stay where they are)."
+        )
 
 
 def _manifest_save(m):
@@ -504,7 +567,7 @@ def cmd_checkout(argv):
     # default: pull remote file
     if len(argv) < 2:
         die("usage: shunt checkout @host <remote_path>")
-    host = resolve_host(argv[0])          # dies if the alias is unknown
+    host = resolve_host(argv[0])  # dies if the alias is unknown
     remote_path = argv[1]
 
     local = os.path.realpath(_checkout_local_path(host["alias"], remote_path))
@@ -513,6 +576,15 @@ def cmd_checkout(argv):
     safe_root = os.path.realpath(os.path.join(CONF, "checkouts"))
     if local != safe_root and not local.startswith(safe_root + os.sep):
         die(f"unsafe remote path (escapes checkout sandbox): {remote_path}")
+
+    # The manifest is read BEFORE anything is touched on disk — it is the last gate that
+    # can refuse, and a gate placed after the write is not a gate. Read where it used to
+    # be (below, beside the save), a manifest that refuses did so with the pull already
+    # moved into place: a RE-checkout over an edited file destroyed exactly the work the
+    # refusal then claimed it had left alone. Same lesson as the `.part` file below, one
+    # step earlier in the same command — the pull is not the only thing that can be too
+    # late to take back.
+    m = _manifest_load()
     os.makedirs(os.path.dirname(local), exist_ok=True)
 
     # pull via `cat` over ssh — raw-faithful (no scp binary quoting issues).
@@ -523,20 +595,17 @@ def cmd_checkout(argv):
     sa = ssh_argv(host)
     part = local + ".part"
     with open(part, "wb") as f:
-        r = subprocess.run(sa + ["cat -- " + shlex.quote(remote_path)],
-                           stdout=f, stderr=subprocess.PIPE)
+        r = subprocess.run(sa + ["cat -- " + shlex.quote(remote_path)], stdout=f, stderr=subprocess.PIPE)
     if r.returncode != 0:
         try:
             os.unlink(part)
         except Exception:
             pass
         sys.stderr.write((r.stderr or b"").decode("utf-8", "replace"))
-        die(f"checkout failed (exit {r.returncode}) — the local file is untouched",
-            r.returncode)
+        die(f"checkout failed (exit {r.returncode}) — the local file is untouched", r.returncode)
     os.replace(part, local)
 
     base_sha = _sha256_file(local)
-    m = _manifest_load()
     m[local] = {"host": host["alias"], "remote": remote_path, "base_sha": base_sha}
     _manifest_save(m)
     print(local)
@@ -592,11 +661,9 @@ def cmd_commit(argv):
         sa = ssh_argv(host)
 
         # get remote current sha via sha256sum
-        r = subprocess.run(sa + ["sha256sum -- " + shlex.quote(remote_path)],
-                           capture_output=True)
+        r = subprocess.run(sa + ["sha256sum -- " + shlex.quote(remote_path)], capture_output=True)
         if r.returncode != 0:
-            print(f"SKIP {local} — cannot sha256sum remote: "
-                  f"{(r.stderr or b'').decode('utf-8', 'replace').strip()}")
+            print(f"SKIP {local} — cannot sha256sum remote: {(r.stderr or b'').decode('utf-8', 'replace').strip()}")
             overall_rc = 1
             continue
         remote_sha_line = (r.stdout or b"").decode("utf-8", "replace").strip()
@@ -630,8 +697,7 @@ def cmd_commit(argv):
         b64 = base64.b64encode(json.dumps(payload).encode()).decode()
         # logged per file, here: everything before this point only READ the remote side
         audit_cli("commit", alias, remote_path)
-        r2 = subprocess.run(sa + ["python3", "-", b64],
-                            input=write_helper_src, capture_output=True)
+        r2 = subprocess.run(sa + ["python3", "-", b64], input=write_helper_src, capture_output=True)
         raw_out = (r2.stdout or b"").decode("utf-8", "replace").strip()
         try:
             result = json.loads(raw_out)
@@ -670,10 +736,20 @@ def main():
         cmd_help()
         sys.exit(2)
     sub, argv = sys.argv[1], sys.argv[2:]
-    fns = {"hosts": cmd_hosts, "run": cmd_run, "read": cmd_read, "edit": cmd_edit,
-           "cp": cmd_cp, "bg": cmd_bg, "get": cmd_get, "log": cmd_log,
-           "install": cmd_install, "checkout": cmd_checkout, "commit": cmd_commit,
-           "help": cmd_help}
+    fns = {
+        "hosts": cmd_hosts,
+        "run": cmd_run,
+        "read": cmd_read,
+        "edit": cmd_edit,
+        "cp": cmd_cp,
+        "bg": cmd_bg,
+        "get": cmd_get,
+        "log": cmd_log,
+        "install": cmd_install,
+        "checkout": cmd_checkout,
+        "commit": cmd_commit,
+        "help": cmd_help,
+    }
     fn = fns.get(sub)
     if not fn:
         die(f"unknown subcommand: {sub} (run `shunt` for the map)")

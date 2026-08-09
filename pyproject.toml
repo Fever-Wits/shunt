@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shunt"
-version = "2026080707"
+version = "2026080920"
 description = "transparent remote hands for an AI coding agent — redirects bash to a chosen remote host via a Claude Code hook"
 requires-python = ">=3.11"
 dependencies = []
@@ -36,4 +36,11 @@ packages = ["src/shunt"]
 line-length = 120
 
 [tool.ruff.lint]
+# Spelled out rather than left to ruff's defaults: the defaults drift between
+# releases, and CI installs the latest ruff. This is the default set as of
+# ruff 0.15 — E4 (imports), E7 (statements), E9 (syntax/IO), F (pyflakes).
+# E1/E2/E3 (indentation, whitespace, blank lines) and E5 (line length) are
+# deliberately out: `ruff format` is the style authority here, and those are
+# the categories that argue with it.
+select = ["E4", "E7", "E9", "F"]
 ignore = ["E401", "E701", "E702", "E703", "E741"]

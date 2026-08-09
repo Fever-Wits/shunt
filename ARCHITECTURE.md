@@ -102,7 +102,14 @@ tool. File and search tools keep touching the local disk while the session feels
 remote, and a spawned agent inherits the routing and runs its own bash on the far
 machine — reading absent local files as facts about the world. Both failures are
 silent, which is why the wider matcher exists: on every matched non-bash tool the
-hook answers with `additionalContext` instead of `updatedInput`.
+hook answers with `additionalContext` and no `updatedInput` — nothing is
+rewritten, only said. That is one of three shapes the reply takes; the other two
+are `updatedInput` alone (the plain rewrite above) and **both in one reply**, when
+a rewritten command carries a note with it (`pretool.emit(command, notice)` — the
+first command after a switch, or one that cannot be taken back). The note rides in
+the same reply as the rewrite deliberately: sent as a reply of its own it would
+return before the rewrite, leaving the command to run here, on the machine the
+caller believes they left.
 
 - **`Agent`** — warned on **every** spawn; each one inherits the mode anew, so a
   once-per-session warning would miss all the later ones.
@@ -209,7 +216,9 @@ Routing is **per agent session**, so parallel sessions never fight over a single
 global "current host".
 
 - **State file.** The active alias for a session is stored in
-  `<conf>/target.<session_id>`. Absence means "local".
+  `<conf>/target.<session_id>`. Absence means "local"; a file that is present but names
+  no host (empty, a directory, unreadable) is a third reading — UNKNOWN: bash is
+  refused, never read as local.
 - **`@<alias>`** writes that alias to the session's state file and confirms
   `REMOTE → <alias> (<target>)`. An unknown alias is reported and changes
   nothing.
@@ -444,7 +453,8 @@ cannot hide a change), and whether normalization was applied.
 The helper always exits **0** — its answer is the JSON, not the code. `shunt edit`
 therefore reads the status and exits `0` only for `ok`, so `shunt edit … && deploy`
 does not deploy a file that was never edited; a transport failure keeps ssh's own
-code, which says more than a generic `1`.
+code, which says more than a generic `1`. As a line of its own, though: while the
+session is routed to a host, a `shunt …` line carrying `&&` runs nothing.
 
 ⚠ The atomic replace swaps the file's inode. If the edited path is on an NFS
 mount, another client holding an open handle to the old inode can see `ESTALE`.
@@ -520,7 +530,9 @@ shunt.toml                 the hosts:  alias = "user@host", or the inline-table 
                              an optional [audit] section tunes trim_at_mb / drop_months
 hosts                      the previous format, still read when shunt.toml is absent:
                              <alias> ssh <target> [key=PATH]  (one host per line)
-target.<session_id>        active alias for a session (absent = local)
+target.<session_id>        active alias for a session; absent = local; present but
+                             naming no host (empty, a directory, unreadable) = UNKNOWN:
+                             bash is refused, never read as local
 active-host.<session_id>   sidecar: current routing target (for status displays)
 warned.<session_id>        the host this session was already warned about (see §3)
 switched.<session_id>      armed by `@<alias>`, spent by the first command after it —
@@ -541,8 +553,10 @@ identity over in `~/.ssh/config` breaks silently the day only one of them is
 edited. The config is written atomically (temp file in the same directory,
 `fsync`, `os.replace`), so a reader — and the hook reads it before every command
 — sees either the whole old file or the whole new one. A broken config is loud in
-the CLI, which reports the reason and stops; in the hook it means local, for the
-reason given in §5. In the legacy format, a line that does not name `ssh` as the
+the CLI, which reports the reason and stops; in the hook it splits with the
+session: an unrouted one runs locally, never having asked the config where to go,
+and a routed one finds its alias unresolvable and runs nothing, for the reason
+given in §5. In the legacy format, a line that does not name `ssh` as the
 transport is not turned into some other kind of destination — it is skipped, and
 the skipped lines are counted out loud.
 
@@ -569,6 +583,9 @@ Two facts make that fixable:
 
 ```
 <conf>/target.<session_id>     # contains the host alias; ABSENT means local
+                               # PRESENT but naming no host (empty, a directory,
+                               # unreadable) = UNKNOWN — bash is refused, never
+                               # read as local
                                # <conf> is $SHUNT_CONF or ~/.config/shunt
 ```
 
