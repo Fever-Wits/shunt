@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shunt"
-version = "2026081009"
+version = "2026081017"
 description = "transparent remote hands for an AI coding agent — redirects bash to a chosen remote host via a Claude Code hook"
 requires-python = ">=3.11"
 dependencies = []

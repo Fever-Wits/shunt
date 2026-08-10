@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
-## [2026081100] — 2026-08-11
+## [2026081017] — 2026-08-10
 
 One theme again, one step further in: **shunt refusing to answer from something it has not
 read.** The previous release taught it to say which machine you are standing on; this one
