@@ -10,10 +10,100 @@ per-session working directory kept across commands. Alongside the hook ships a s
 `cp`, `bg`, `get`, `log`, `checkout` and `commit` — plus `hosts`, `install`, and a bare
 `shunt` that prints its own map.
 
-What you can do: **edit remote files** with your normal local tools · **run commands transparently** on a remote host · **long tasks** in the background with `bg` + `--status` to monitor.
+So: **commands run transparently** on the machine you chose · **remote files are edited
+with your normal local tools** (`checkout` → edit → `commit`, with an optimistic SHA-lock)
+· **long work goes to the background** and survives the disconnect.
 
 One transport: **ssh** + `ControlMaster` — no open ports, no shared token, nothing
 of shunt's installed on the server.
+
+---
+
+## How it works
+
+A `PreToolUse` hook sees every bash command before it runs. While the session is routed to
+a host, the hook hands back that command **rewritten**: wrapped in `ssh` to that host, with
+the session's remembered working directory restored in front of it and a `trap EXIT` behind
+it that carries the exit code home. Claude Code runs the rewritten string in its normal
+sandbox, through the documented `updatedInput` mechanism — the agent goes on writing plain
+`make`, and the rewritten `ssh …` line is what lands in the transcript (so a routed command
+is not the place for a secret). `ControlMaster` keeps one multiplexed connection alive
+between commands, so the handshake is paid once and the rest feel local-fast.
+
+**Nothing of shunt's is installed on the far side** — no daemon, no agent, no package. It
+does use ordinary tools that are already there: a POSIX shell for every routed command,
+`python3` for `shunt edit` / `commit` (and the `install` check), `sha256sum` for `commit`,
+`wget` for `get`, `systemd-run` / `systemctl` / `journalctl` for `bg`, and `rsync` on both
+machines for `cp`. It also *writes* one thing over there: `$HOME/.cache/shunt/cwd-<session>`,
+created `mkdir -m 700`, holding the directory you last worked in — swept of entries older
+than 30 days once per switch, and nothing outside that name is touched.
+
+Two things do not travel. `@<alias>`, `@local` and `@status` are bash lines the hook
+intercepts and answers itself: that is the switch, one setting per session. And the `shunt`
+CLI always runs **here**, opening its own connections for the work bash does badly over a
+wire — reading and editing remote files, copying, background jobs, downloads, the audit
+log.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the details.
+
+---
+
+## What it saves you
+
+- **The ssh wrapping.** You stop writing `ssh host "…"` around every command — and stop
+  forgetting it on the one command where it mattered.
+- **The quoting.** Anything that survives one shell only to be parsed by another has to be
+  escaped for both, and the escaping is where remote one-liners go to die. shunt quotes the
+  payload once, mechanically, so pipes, quotes, `$(…)` and newlines arrive as you typed
+  them.
+- **The `cd` bookkeeping.** ssh gives every command a fresh login shell, so `cd build`
+  followed by `make` builds in `$HOME`. shunt remembers the directory per session on the
+  far host, and the next command starts where the last one left off.
+- **The multiplexing setup.** No `~/.ssh/config` stanza to write and keep in sync: the
+  ControlMaster socket is keyed per session *and* per destination — user, host and port —
+  so two aliases pointing at one machine through different accounts never share a tunnel.
+
+---
+
+## What it guards
+
+**Every guard here exists because something real happened.** None of them blocks you on
+suspicion; each one exists because a specific silence cost somebody a specific thing, and
+the cheapest fix was a sentence.
+
+⚠ **Know what "refuses" means here.** The hook does not deny the tool call. It replaces
+your command with an `echo` of the reason, so **the call succeeds — exit 0, the reason on
+stdout** — and nothing runs on either machine. It is built that way on purpose: the hook
+must never raise (a traceback in front of every bash command is worse than anything it
+would report), and a refusal that ran the command locally would be the very accident these
+guards exist to prevent. The **whole line** is replaced, chain and all: nothing in
+`make deploy && ./verify` runs, not even `./verify`. The cost is the code — a refusal
+reports **0**, so anything reading only that number (a `&&` in your *next* command, a
+`set -e` script, an agent's next step) takes it for success. Read the output, not just the
+exit code.
+
+### For the session
+
+| Guard | What it does |
+|---|---|
+| **The switch asks the machine** | `@web-01` opens a real ssh handshake before it answers: `— connected`, or `— switch written, but @web-01 did not answer the check …` carrying ssh's own reason, or `— could not check whether it answers (…)` when the question could not be put at all. About **3 s** against a host that is not there (**5 s** worst case). The routing is written *before* the probe, so a probe that hangs can never cost you the switch, and a machine that is merely rebooting stays yours. |
+| **Both directions get a ticket** | The first command after any switch says where it is going: `it runs THERE, not here.` after `@alias`, `this one runs HERE, on the local machine.` after `@local`. Going home is a switch like any other, and the command right after it is the one that acts out of habit. |
+| **Irreversible commands are announced** | While remote, a line running `rm`, `rmdir`, `mv`, `dd`, `shred`, `truncate`, `mkfs` (and `mkfs.*`), `wipefs`, `reboot`, `poweroff`, `halt`, `shutdown`, a recursive `chown -R` / `chmod -R`, `find … -delete`, `git clean` / `git … --hard`, `docker rm` / `rmi` / `prune`, or a `>` that truncates its target arrives with the machine named in front of it. It **warns and runs** — nothing is blocked, no exit code changes — and it speaks every time, not once per session. |
+| **Three states of the routing file, not two** | The per-session routing file is missing (an ordinary local session, and the silence there is the point), names a host (remote), or **is there and names nothing** — a torn write, an emptied file, a directory in its place. The third never falls back to local: the command is refused and the reason is printed. For a tool whose default is "run it here", every quiet fall to the default is a fall to the wrong machine. The same refusal covers an alias that stops resolving — renamed, deleted, or a config that broke — because the session still says REMOTE while the command would run here. A switch to a host that is not configured is refused up front (`[shunt] unknown host: …`) and leaves the previous routing exactly as it was. |
+| **A compound `shunt …` line is refused while remote** | And equally while the routing cannot be read. `shunt` runs *here* — and so would everything past a `;`, `&`, `\|`, a backtick, `$`, `(` or a newline, on the machine you believe you left. Redirections (`>`, `>>`, `2>`, `<`) are deliberately **not** in that class: they cannot hide a second command, and refusing them would refuse `shunt read @web-01 /etc/nginx/nginx.conf > local.txt`. In a local session the same line is ordinary work and runs. |
+| **A broken config directory shouts** | The switch ticket that cannot be written, read or removed; the routing that `@local` cannot clear; the sidecar files that cannot be cleaned up — each says so, with the errno and with what you lose until it is fixed. A `@<alias>` whose routing cannot be *written* is the loudest: it says the switch **did not happen**, names what the session is still on, and changes nothing. These repeat, deliberately off the once-per-session budget every other message here is kept on: that budget is itself a file in the directory that is broken. |
+| **`exit 255` is named** | ssh's own failures exit **255**, and bare it reads as a verdict from whatever you thought you were running. One line on stderr says the transport failed and the command almost certainly never left — and the exit code is handed on untouched, 255 included. On every other code this guard adds nothing at all. |
+| **The remembered directory speaks when it is gone** | The far side restores your session's directory before every command. If it cannot be entered — swept, unmounted, permissions changed — the command still runs, in `$HOME`, and a line on stderr says so by name — with both paths as the far shell expands them: `shunt: /srv/release cannot be entered (gone or not accessible); running in /home/deploy instead`. Silence here is how `rm -rf ./*` meant for a release directory happens in a home directory instead. It says CANNOT BE ENTERED rather than "is gone", because a wrong cause sends you looking in the wrong place. Once per switch it also *probes* the write, so a `$HOME` that cannot be written to is reported instead of costing you every `cd` from then on. |
+| **Some bad arguments are refused rather than guessed** | Where a wrong argument used to produce a plausible-looking *answer*, it now refuses with exit **2**: `shunt log -n 5OO` (a letter O) printed the default 50 records, which look exactly like the whole truth; `shunt bg … --name` with no label handed `--name` to the far side as part of your command; `bg --status` / `--stop` with no job did the same. This is a list, not a rule — other malformed arguments still fail with a traceback. |
+
+### For a spawned agent
+
+| Guard | What it does |
+|---|---|
+| **The child is told where it stands** | A spawned agent's prompt arrives with a short frame appended: that a hook routes its bash to `@<alias>`, that its own file tools are **not** routed and stay on the local disk, and that `@local` is one session-wide setting shared with its parent and with any agent working beside it — so switching is never a private choice. Two cases drop the frame and send the parent's warning alone: an `Agent` input with no string prompt, and a reply that would exceed **9000** characters — a brief long enough to overflow it costs a note, never a warning. |
+| **The parent is warned on every spawn** | Spawning while remote warns the parent that the child inherits the mode and will read absent local files as facts. No budget, no once-per-session: each spawn is a new agent that has been told nothing, and a budget shared with the file tools would let one `Grep` silence it. When the routing cannot be read at all, the **parent** hears something sharper — that the child's bash will be **refused** until the routing is settled. Nothing is appended to the child's prompt in that case, deliberately: unlike the remote state, this one announces itself to the child on its very first bash command, which comes back refused with both ways out named. |
+| **File tools say they stayed home** | `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Grep` and `Glob` keep working on the **local** disk while the session feels remote. One line, once per host per session, names both remedies — `Grep` is called often enough that a line per call would become wallpaper, and wallpaper is silent exactly when it should speak. `@local` clears that budget, so coming back to the same host warns you again. `Grep` and `Glob` are on the list for the agent rather than for you: a person searching a machine types `grep` into bash and the hook sends it to the right place, while an agent reaches for the tool. |
+| **Exit codes mean what they say** | The far side's code comes back through a `trap EXIT` that takes it first and spends it last, so no bookkeeping of shunt's can change what your command returned; `run`, `get`, `bg`, `checkout` and `install` hand a remote code straight back instead of flattening it to one number, and `cp` hands back the local `rsync`'s. Where a code *must* be translated, it is because the wire lies: `shunt edit`'s helper answers in JSON and always exits 0 — `not_found`, `ambiguous` and `conflict` included — so shunt reads the status instead and returns 0 only on `ok`. ⚠ `--dry-run` that finds its match is also `ok`, so it too exits 0 without changing anything: `shunt edit … --dry-run && deploy` deploys. |
 
 ---
 
@@ -59,10 +149,12 @@ The CLI is only half of shunt. The transparent redirection comes from the
 Use the absolute path to `pretool.py` in your clone (or wherever the package was
 installed). `shunt install` will print the exact line for you.
 
-**The matcher is wider than `Bash` on purpose.** Only `Bash` is ever rewritten; the
-other tools are matched so the hook can *warn* that the mode does not cover them — see
+**The matcher is wider than `Bash` on purpose.** `Bash` is the only tool ever sent to
+another machine. `Agent` is touched in a second way — the child's prompt comes back with a
+short frame appended, see [What it guards](#what-it-guards) — and the file and search tools
+are matched only so the hook can *warn* that the mode does not cover them, see
 [Where the mode stops](#where-the-mode-stops). Register only `Bash` and you keep the
-redirection but lose the warnings.
+redirection but lose both the frame and the warnings.
 
 **Restart the Claude Code session** after editing `settings.json` — hooks are read
 at session start.
@@ -96,7 +188,7 @@ That `[shunt] LOCAL` confirms install completion. Switch to your host and your
 bash now runs there:
 
 ```
-@web-01          →  [shunt] mode: REMOTE → web-01 (user@203.0.113.10)
+@web-01          →  [shunt] mode: REMOTE → web-01 (user@203.0.113.10) — connected
 hostname         →  web-01
 pwd              →  /home/user        (cwd is remembered per session)
 @local           →  [shunt] mode: LOCAL
@@ -113,9 +205,9 @@ Routing is **per session**, so parallel Claude sessions don't clash.
 
 | Command     | Effect |
 |-------------|--------|
-| `@<alias>`  | Route this session's bash to `<alias>` → `[shunt] mode: REMOTE → <alias> (<target>)` |
+| `@<alias>`  | Route this session's bash to `<alias>` → `[shunt] mode: REMOTE → <alias> (<target>) — connected` (the tail is the live check; see [What it guards](#what-it-guards)) |
 | `@local`    | Stop redirecting; bash runs locally again → `[shunt] mode: LOCAL` |
-| `@status`   | Show current routing → `[shunt] REMOTE → <alias>` or `[shunt] LOCAL` |
+| `@status`   | Show current routing → `[shunt] REMOTE → <alias>`, `[shunt] LOCAL`, or `[shunt] UNKNOWN — …` when the routing file is there but names no host |
 
 While routed, every bash command runs on the remote host. The hook keeps the
 working directory per session (so `cd foo` then `ls` works as expected) and appends
@@ -124,21 +216,12 @@ each routed command to `~/.config/shunt/audit.log`.
 `shunt ...` commands themselves always run locally — the CLI does its own
 transport, so it is never redirected.
 
-Three behaviours worth knowing before you rely on the transparency:
+What the hook says while you work — the switch probe, the first-command ticket, the
+warning before something irreversible, the refusal when the routing cannot be read — is
+catalogued under [What it guards](#what-it-guards). Two things stay here: one is a
+property of the transport rather than a guard, the other is the detail behind a
+catalogue row.
 
-- **A command that cannot be taken back is announced first.** While the session is on a
-  host, a line running `rm`, `mv`, `dd`, `shred`, `mkfs*`, `shutdown`, a recursive
-  `chown -R` / `chmod -R`, a `find … -delete`, a `git clean` / `git … --hard`, a
-  `docker rm` / `rmi` / `prune`, or a `>` that truncates a file arrives with the machine
-  named in front of it:
-
-  ```
-  ⚠ shunt: you are on @web-01 — this runs THERE and cannot be taken back: git … --hard,
-  docker … rm. Check which machine you meant; `@local` first if it is this one.
-  ```
-
-  It **warns and runs** — nothing is blocked and no exit code changes — and it speaks
-  every time, not once per session.
 - **An interrupted command is not killed on the far side.** No pty is allocated, so
   nothing sends the remote process SIGHUP — it keeps running there until it finishes on
   its own. Allocating one (`ssh -tt`) was measured and rejected: it hangs every pager and
@@ -246,9 +329,12 @@ the built-in Edit tool: `OLD` must occur exactly once (or `--expected N` times),
 otherwise the edit is refused. The edit is verified after write (SHA-256) and written
 atomically. It is applied to the **raw bytes**: only the matched region is rewritten, so
 line endings elsewhere in the file and bytes that are not valid UTF-8 come back exactly
-as they were. The exit code follows the answer — **0 only when the file was changed** —
-so `shunt edit … && deploy` is safe to write — as its own line, though: a `shunt …` line
-carrying `&&` is refused while the session is remote (see under `shunt run` above).
+as they were. The exit code follows the **answer**, not ssh: `not_found`, `ambiguous`,
+`conflict` and `error` are non-zero, so `shunt edit … && deploy` will not deploy an
+unchanged file. Two things to hold: a failed **transport** returns ssh's own code, and
+`--dry-run` counts as success — a preview that found its match exits **0** while changing
+nothing, so never chain a dry run. Write it as its own line, too: a `shunt …` line carrying
+`&&` is refused while the session is remote (see under `shunt run` above).
 
 ```bash
 $ shunt edit @web-01 /opt/app/config.ini "debug = false" "debug = true"
@@ -292,8 +378,17 @@ $ shunt bg @web-01 "make -j8 all" --name nightly-build
 JOB=shunt-nightly-build
 ```
 
-- `--name LABEL` — human-readable unit name (sanitized to `shunt-<label>`); without
-  it a random unit name is generated.
+⚠ **Quoting is not the same as `shunt run`.** The remaining words are joined with spaces
+and handed to `bash -lc` over there — they are **not** re-quoted, so
+`shunt bg @web-01 echo "a b"` arrives as `echo a b`. Quote the whole command as one
+argument, the way the example does.
+
+- `--name LABEL` — human-readable unit name, sanitized to `shunt-<label>`: lower-cased,
+  every character outside `a-z0-9-` replaced by `-`, leading and trailing `-` dropped.
+  Without the flag — or when the label sanitizes down to nothing, as `!!!` does — a random
+  unit name is generated. **`--name` with no label at all is refused** (exit 2): it used to
+  be handed to the far side as part of your command, so
+  `shunt bg @web-01 "deploy.sh" --name` ran `deploy.sh --name` there.
 - `shunt bg @host --list` — list `shunt-*` units.
 - `shunt bg @host --status JOB` — last log lines + exit status of a job.
 - `shunt bg @host --stop JOB` — stop a job and reset its failed state.
@@ -318,9 +413,17 @@ downloading in background; progress: shunt read @web-01 /tmp/shunt-wget-….log 
 ### `shunt log [-n N]`
 
 The local record of what left this machine (`~/.config/shunt/audit.log`): bash the hook
-redirected, and the CLI subcommands that reached a host (`sid=cli`, the subcommand in
-brackets). Default the last 50 **records**; `-n N` for the last `N`. One command is one
-record, however many lines it was typed on.
+redirected, and exactly six CLI subcommands — `run`, `edit`, `cp`, `bg` (every shape,
+`--list` and `--status` included), `get`, `commit` (`sid=cli`, the subcommand in brackets).
+`read` and `checkout` reach a host and are deliberately **not** logged: they only fetch.
+`install` reaches one too and is not logged either — its own output is the record. `hosts`
+and `log` never leave this machine at all. Default the last 50 **records**; `-n N` for the
+last `N`. One command is one record, however many lines it was typed on.
+
+**A `-n` that is not a number is refused** (exit 2) rather than quietly falling back to the
+default: `-n 5OO` with a letter O printed 50 records, and 50 records look exactly like the
+whole answer — which is how somebody concludes a command was never run on a server. There
+is no upper bound; `-n 0` prints nothing, and a negative `N` is read as its absolute value.
 
 ```bash
 $ shunt log -n 20
@@ -427,7 +530,7 @@ Nothing is migrated for you; move when you want to, or don't. Should both files 
 | Variable | Used by | Meaning |
 |----------|---------|---------|
 | `SHUNT_CONF` | CLI + hook | Config directory (default `~/.config/shunt`) |
-| `SHUNT_EDIT_MAX_BYTES` | edit + write helpers | Max file size shunt will **push** — `shunt edit` and `shunt commit` (default 64 MiB; larger → use `shunt cp` + local edit). It does **not** cap the pull direction: `shunt checkout` fetches whatever is there, so check the size of a big remote file first. |
+| `SHUNT_EDIT_MAX_BYTES` | the helpers, **on the server** | Size ceiling, default **64 MiB** (`67108864`). ⚠ It is read in the environment of the **remote** process, and shunt sends no environment over ssh — setting it in your local shell does nothing. Set it for the ssh account on the far host. The two helpers measure different things: for `shunt edit` it caps the **remote file being opened**; for `shunt commit` it caps the **content being sent** — the raw bytes at exactly that number, with an inflated base64 payload rejected even before decoding, at twice it. Neither caps the pull direction — `shunt checkout` fetches whatever is there, so check the size of a big remote file first. Over the ceiling → use `shunt cp` and edit locally. |
 
 ---
 
@@ -442,19 +545,14 @@ fully encrypted, nothing of shunt's installed on the server. ssh protects the
 channel; it does not protect the machine from its legitimate user — so use a
 dedicated key and the least-privileged account that can do the job.
 
+⚠ **A rewritten command carries `permissionDecision: allow`.** That is how a `PreToolUse`
+hook hands a replacement command back, and it means Claude Code does not ask you about the
+bash it is about to run on the far host. If you rely on Bash permission rules or prompts as
+a safety net, they are not the net while a session is routed — the least-privileged remote
+account is. (An `Agent` spawn is deliberately different: the hook appends its frame without
+any `permissionDecision`, so your own rules still decide whether the spawn happens.)
+
 See [SECURITY.md](SECURITY.md) for the full threat model.
-
----
-
-## How it works
-
-The hook returns an `updatedInput` from `PreToolUse` so the rewritten command runs
-in Claude Code's normal sandbox — an official, documented mechanism. The ssh
-transport keeps cwd in a per-session remote state file and captures exit codes via a
-`trap EXIT`; `ControlMaster` reuses one multiplexed connection, so the handshake is
-paid once and later commands feel local-fast.
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the details.
 
 ---
 

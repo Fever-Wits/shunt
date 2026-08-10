@@ -56,13 +56,30 @@ PRETOOL = pretool.__file__
 
 
 class HookConf:
-    """A temp SHUNT_CONF with one host, plus the session files the hook reads."""
+    """A temp SHUNT_CONF with one host, plus the session files the hook reads.
+
+    It also carries a STUB `ssh`, because `@alias` now probes the host it switches to. No
+    test may open a real connection: a suite that reaches the network is a suite whose
+    speed and result depend on somebody else's router. The stub answers instantly and, by
+    default, successfully — which is what keeps every test below about the state file
+    rather than about a host being up.
+    """
 
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-target-")
         with open(os.path.join(self.dir, "shunt.toml"), "w") as f:
             f.write('[hosts]\nh1 = "root@10.0.0.1"\n')
+        self.bin = os.path.join(self.dir, "_bin")
+        os.makedirs(self.bin)
+        self.stub_ssh()
         return self
+
+    def stub_ssh(self, returncode=0):
+        """The `ssh` the hook will find on PATH — see _run, which puts it there."""
+        path = os.path.join(self.bin, "ssh")
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\nexit %d\n" % returncode)
+        os.chmod(path, 0o755)
 
     def __exit__(self, *_):
         shutil.rmtree(self.dir, ignore_errors=True)
@@ -89,7 +106,7 @@ def _run(conf, payload):
     """PYTHONPATH is stripped for the same reason tests/test_pretool_warnings.py strips it:
     settings.json names pretool.py by absolute path, so the field never has the package on
     sys.path, and the test runner's PYTHONPATH would hide that."""
-    env = dict(os.environ, SHUNT_CONF=conf.dir)
+    env = dict(os.environ, SHUNT_CONF=conf.dir, PATH=conf.bin + os.pathsep + os.environ["PATH"])
     env.pop("PYTHONPATH", None)
     r = subprocess.run([sys.executable, PRETOOL], input=json.dumps(payload).encode(), capture_output=True, env=env)
     return r.returncode, r.stdout.decode()

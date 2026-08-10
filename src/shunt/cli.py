@@ -301,7 +301,16 @@ def cmd_bg(argv):
     # what the CLI asked that host to do is exactly what the log is read for
     audit_cli("bg", host["alias"], " ".join(rest))
     if rest[0] == "--list":
-        return subprocess.run(sa + ["systemctl list-units 'shunt-*' --type=service --no-legend || true"]).returncode
+        # No `|| true` here. `list-units` already exits 0 when the glob matches nothing,
+        # so the guard never bought the empty list anything — it only paid out when the
+        # question could NOT be answered (no systemd on the far side, no permission, a
+        # bad invocation): systemctl failed, `true` answered 0, and an empty listing at
+        # exit 0 reads exactly like "this host has no jobs". The same silence the `--stop`
+        # branch below was fixed for — nothing may be stated that has not been verified.
+        # No motive for the guard was ever recorded: it arrived with the first commit that
+        # tracked this file, nothing anywhere explains it, and later silent-failure passes
+        # walked past it. It was measured instead of guessed at, and removed.
+        return subprocess.run(sa + ["systemctl list-units 'shunt-*' --type=service --no-legend"]).returncode
     if rest[0] == "--status":
         if len(rest) < 2:
             die("usage: shunt bg @host --status JOB")
@@ -463,9 +472,22 @@ def cmd_install(argv):
     print(f"✓ {os.path.join(CONF, config.TOML_NAME)}: {line}")
     # 3) hook instruction (we do NOT touch someone else's settings.json automatically)
     _print_hook_hint()
-    # 4) connection test
+    # 4) connection test — the LAST word install says, and the one a reader keeps: a tick
+    # and a hostname. Its code used to be thrown away and install returned 0 regardless,
+    # so `shunt install … && <next step>` carried on against a machine nothing had
+    # reached, and a failing probe printed no tick but left no trace in the exit code
+    # either. The code IS the answer here; the tick is only its human half.
     print("\nTest:")
-    subprocess.run(sb + ["echo '  ✓ connected to' $(hostname)"])
+    r = subprocess.run(sb + ["echo '  ✓ connected to' $(hostname)"])
+    if r.returncode != 0:
+        # ssh's own code travels out (255 = the transport), the way `run`/`checkout`
+        # already pass a remote code through instead of flattening it to one number.
+        die(
+            f"connection test to {host_ip} FAILED (ssh exit {r.returncode}) — the host "
+            "entry and the hook line above stand, but nothing was reached. Fix the "
+            "connection, then run `shunt install` again; it is idempotent.",
+            r.returncode,
+        )
     return 0
 
 

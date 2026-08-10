@@ -5,6 +5,139 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
+## [2026081009] — 2026-08-10
+
+One theme: shunt saying **which machine you are standing on — before the command, not
+after it.** One entry is the exception that proves the rule: when the transport itself
+fails there is nothing to say beforehand, so it is said after. Two entries change timing
+or an exit code you may have relied on; each is marked ⚠.
+
+### Added
+
+- **`@<alias>` now asks the machine whether it answers.** ⚠ **Behaviour change** — the
+  switch used to be pure bookkeeping and returned in milliseconds; it now waits for a real
+  ssh handshake, about **3 seconds** against a host that is not there (5 in the worst
+  case). What you see when it works:
+
+  ```
+  [shunt] mode: REMOTE → web-01 (deploy@web-01) — connected
+  ```
+
+  and when it does not:
+
+  ```
+  [shunt] mode: REMOTE → web-01 (deploy@web-01) — switch written, but @web-01 did not
+  answer the check — nothing will run until it does. ssh: deploy@web-01: Permission
+  denied (publickey,password).
+  ```
+
+  **The switch stands either way.** A host may be rebooting, and a session that has said
+  where it wants to be is not sent home behind its own back — the routing is written
+  *before* the probe, so a probe that hangs can never cost you the switch. There is a
+  third line, `— could not check whether it answers (…)`, for when the check itself could
+  not be made: a failed probe proves only that *this check* did not get through, and a
+  refused key, a changed host key and a broken login shell all answer from a machine that
+  is perfectly awake. The reason always comes from ssh, never guessed.
+
+  **Why:** the old switch wrote a file and said REMOTE. The first thing that found out
+  whether the host was reachable was your next real command — at the moment you had
+  stopped thinking about machines. The check also warms the connection the next command
+  wants.
+
+- **`@local` leaves the same one-shot ticket `@<alias>` does, and the first command after
+  it says where it is going:**
+
+  ```
+  ℹ shunt: first command since `@local` — this one runs HERE, on the local machine.
+  (said once per switch)
+  ```
+
+  Going home is a switch like any other, and the command right after it is the one that
+  acts out of habit — the habit just points the other way. The dance
+  `@a → @b → @local → @c` used to announce every step except the one that comes back. One
+  file holds both directions, so the last switch wins.
+
+- **A spawned agent is told where it is standing.** The *parent* has been warned on every
+  `Agent` spawn for a while; the child — the one that would actually act on it — was told
+  nothing. It ran `ls`, read a disk it had never seen, and reported what it found as the
+  truth about the world. The child's prompt now arrives with a short frame appended: what
+  routes its bash, that its own file tools are **not** routed and stay on the local disk,
+  and that `@local` is one session-wide setting shared with its parent and with any agent
+  working beside it — so switching is never a private choice. The parent's warning still
+  goes out, in the same response. If the frame cannot be written (an unusual `Agent` input,
+  or a brief long enough to overflow the reply), the parent's warning goes out alone: the
+  cost is a note not written, never a warning lost.
+
+- **Three state failures now shout instead of passing in silence.** All three say the same
+  thing — your shunt config directory is broken — and each used to cost you a message you
+  never knew you were owed:
+
+  - the switch ticket **cannot be written**: the switch stands, but there will be no
+    reminder on the next command, and the far side's once-per-switch housekeeping does not
+    run;
+  - it **cannot be removed**: it stands, so the reminder repeats on every command (and the
+    line says that it will), and the housekeeping is skipped rather than bought again on
+    every command from then on;
+  - it **cannot be read**: nothing will be said about which machine the command runs on,
+    and the line says whether it will be back.
+
+  These repeat deliberately, off the once-per-session budget every other message here is
+  kept on — that budget is itself a file in the very directory that is broken. For a fault
+  of the class "fix it now", repeating is the behaviour that fits.
+
+- **`exit 255` now says what it means.** When ssh cannot reach the host — connection
+  refused, no route, a machine that went down mid-session — ssh exits **255**, and until
+  now that number arrived bare. It reads as a verdict from whatever you believed you were
+  running, and the search for the bug starts in the wrong program. The rewritten command
+  now carries a local epilogue that looks at ssh's own exit code and, on 255 alone, adds
+  one line to stderr:
+
+  ```
+  [shunt] exit 255 = ssh transport failure — @web-01 is down or unreachable; your command
+  almost certainly never ran. Check the host, or @local.
+  ```
+
+  **Not a behaviour change:** the exit code is handed on untouched — 255 stays 255 — and
+  every other code (0, 1, 42) passes through with nothing added to either stream. Nothing
+  is read back from the far side; only the number ssh hands to the local shell.
+  "Almost certainly" is literal rather than cautious: a remote command is free to exit 255
+  on its own account, rarely, and shunt does not state what it has not verified.
+
+### Fixed
+
+- **`shunt bg @host --list` now reports a listing that could not be made.** ⚠ **Behaviour
+  change** for anything reading its exit code. The command ended in `|| true`: a far side
+  with no systemd, no permission, or a bad invocation came back **exit 0 with no output** —
+  indistinguishable from "this host has no jobs". `systemctl list-units` already exits 0
+  when the glob matches nothing, so the guard never bought the empty listing anything; it
+  paid out only when the question could not be answered at all. An empty list is still a
+  success; a real failure is now non-zero, and systemctl's own reason reaches your
+  terminal. This closes the family the previous release opened, where `bg --stop`,
+  `log -n` and `bg --name` each stopped reporting a success they had not verified — those
+  three are unchanged here and still stand.
+
+- **A failed `@<alias>` check no longer stutters `ssh: ssh:`.** Whatever ssh gives as a
+  reason is attributed to ssh, so it cannot be read as shunt's own verdict — but ssh's
+  transport failures already open with that attribution, so the line came back doubled:
+
+  ```
+  … did not answer the check … ssh: ssh: connect to host 203.0.113.9 port 22: Connection
+  timed out
+  ```
+
+  The prefix is now added only where it is missing. The other shape of failure —
+  `deploy@web-01: Permission denied (publickey,password)`, which names an account rather
+  than a program — still gets it. Cosmetic: it never lied and never went quiet.
+
+### Changed
+
+- **Internal, visible only if you import the module:** `pretool._remote_script()` and
+  `pretool.ssh_command()` now take `housekeeping=` where they took `switched=`. Nothing on
+  the command line changes. The old name said "a switch happened", which was never what
+  the flag decided: it means "this command is the one that pays for the far side's
+  once-per-switch housekeeping" — true only when the ticket was actually punched, not
+  merely present.
+
 ## [2026080920] — 2026-08-09
 
 Most of this release is the hook learning to say **where a command actually went** — and

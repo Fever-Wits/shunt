@@ -1,7 +1,7 @@
 """
 Tests for shunt.cli — the `bg` subcommand (long jobs on a host, via systemd-run).
 
-Two silences met here, of the same shape: a first step whose failure nobody looks at,
+Three silences met here, of the same shape: a first step whose failure nobody looks at,
 and a second step that speaks as if it had succeeded.
 
   --stop  ran `systemctl stop JOB; …; echo stopped`. The `;` let the stop fail and the
@@ -16,13 +16,22 @@ and a second step that speaks as if it had succeeded.
           without its argument; this one fell to a default, and the default was a command
           nobody typed.
 
+  --list  ended in `|| true`. `systemctl list-units` already exits 0 when the glob
+          matches nothing, so the guard bought the empty list nothing and paid out only
+          when the question could not be answered at all — no systemd, no permission, a
+          bad invocation — handing back exit 0 and no output, which is indistinguishable
+          from "this host has no jobs". No motive for the guard was ever recorded: it
+          arrived with the first commit that tracked this file, and later silent-failure
+          passes walked past it. It was measured instead of guessed at, and removed.
+
 Coverage:
   - --stop ties both the word and the exit code to what systemctl actually did
   - a stop that fails says nothing about having stopped anything
   - the fire-and-forget cleanup (reset-failed) stays fire-and-forget, inside the success
   - --name without a label is refused, and the refusal says what it wants
   - --name with a label still works, and the label still gets sanitised
-  - the ordinary shapes (--list, --status, starting a job) are untouched
+  - --list hands back what systemctl actually did, and an empty list is still a success
+  - the ordinary shapes (--status, starting a job) are untouched
 
 ssh is stubbed everywhere — no connection is attempted. SHUNT_CONF points at a temp dir
 with one fake host.
@@ -75,25 +84,19 @@ def bg_with_stubbed_ssh(argv, returncode=0):
     return seen["argv"][-1], rc
 
 
-def run_far_side(script, stop_succeeds):
-    """Run the generated remote script under a bash with a FAKE systemctl.
+def run_far_side_with_systemctl(script, stub_body):
+    """Run the generated remote script under a bash whose `systemctl` is a stub.
 
-    The point of the fix is what the far shell does with the chain, so the chain is
+    The point of these fixes is what the far shell does with the chain, so the chain is
     executed rather than pattern-matched: a stub `systemctl` on PATH answers success or
-    failure, and what comes back is what a caller would actually see.
+    failure, and what comes back is what a caller would actually see. `stub_body` is the
+    /bin/sh body of that stub, so each caller spells out the far side it is asking about.
     """
     binn = tempfile.mkdtemp(prefix="shunt-test-bg-bin-")
     try:
         stub = os.path.join(binn, "systemctl")
         with open(stub, "w") as f:
-            f.write(
-                "#!/bin/sh\n"
-                'if [ "$1" = stop ]; then\n'
-                '  echo "Failed to stop $2: Unit $2 not loaded." >&2\n'
-                f"  exit {0 if stop_succeeds else 5}\n"
-                "fi\n"
-                "exit 0\n"
-            )
+            f.write("#!/bin/sh\n" + stub_body)
         os.chmod(stub, 0o755)
         return subprocess.run(
             ["bash", "-c", script],
@@ -103,6 +106,30 @@ def run_far_side(script, stop_succeeds):
         )
     finally:
         shutil.rmtree(binn, ignore_errors=True)
+
+
+def run_far_side(script, stop_succeeds):
+    """A far side where `systemctl stop` succeeds or fails, and everything else works."""
+    return run_far_side_with_systemctl(
+        script,
+        'if [ "$1" = stop ]; then\n'
+        '  echo "Failed to stop $2: Unit $2 not loaded." >&2\n'
+        f"  exit {0 if stop_succeeds else 5}\n"
+        "fi\n"
+        "exit 0\n",
+    )
+
+
+# far sides for `--list`, each one thing that can happen when the question is asked
+LIST_CANNOT_ANSWER = (
+    'if [ "$1" = list-units ]; then\n'
+    '  echo "Failed to list units: Connection reset by peer" >&2\n'
+    "  exit 1\n"
+    "fi\n"
+    "exit 0\n"
+)
+LIST_MATCHES_NOTHING = "exit 0\n"  # what real systemctl does: says nothing, succeeds
+LIST_HAS_JOBS = 'echo "shunt-A1B2C3D4.service loaded active running /bin/sh -c nightly"\nexit 0\n'
 
 
 # ── --stop: the word and the exit code must follow the deed ────────────────────
@@ -148,6 +175,49 @@ class TestStopIsHonest(unittest.TestCase):
     def test_the_job_name_is_still_quoted(self):
         script = self._script("weird; rm -rf /")
         self.assertIn("'weird; rm -rf /'", script)
+
+
+# ── --list: a question that could not be answered is not an empty answer ───────
+
+
+class TestListIsHonest(unittest.TestCase):
+    """`|| true` used to ride on the end of the --list command.
+
+    It never bought the empty list anything — `systemctl list-units` already exits 0
+    when the glob matches nothing — and it cost the only case that mattered: a systemctl
+    that could NOT answer came back 0 with no output, which reads exactly like "this host
+    has no jobs". The caller cannot tell the two apart, and the wrong one is silent.
+    """
+
+    def _script(self):
+        with TmpHosts():
+            script, _ = bg_with_stubbed_ssh(["@h1", "--list"])
+        return script
+
+    def test_a_list_that_could_not_run_comes_back_non_zero(self):
+        """The exit code is what a script reads; `true` used to answer for systemctl."""
+        r = run_far_side_with_systemctl(self._script(), LIST_CANNOT_ANSWER)
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_the_guard_is_not_back(self):
+        """Named so a future hand that re-adds `|| true` hears about it here."""
+        self.assertNotIn("|| true", self._script())
+
+    def test_a_failed_list_still_says_WHY(self):
+        """systemctl's own stderr was never the problem — it must survive the fix."""
+        r = run_far_side_with_systemctl(self._script(), LIST_CANNOT_ANSWER)
+        self.assertIn("Connection reset", r.stderr)
+
+    def test_nothing_matching_is_still_a_success(self):
+        """What the guard was believed to be for. It was already true without it."""
+        r = run_far_side_with_systemctl(self._script(), LIST_MATCHES_NOTHING)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(r.stdout, "")
+
+    def test_a_host_with_jobs_still_prints_them_and_succeeds(self):
+        r = run_far_side_with_systemctl(self._script(), LIST_HAS_JOBS)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("shunt-A1B2C3D4", r.stdout)
 
 
 # ── --name: a flag without its value is refused, not absorbed ──────────────────

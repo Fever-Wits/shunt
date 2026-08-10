@@ -391,8 +391,117 @@ def _warned_before(sid, alias):
     return False
 
 
-def warn_if_off_mode(tool, sid):
+# ── what a spawned agent is told about the machine it was born on ─────────────
+# The parent has been warned about a spawn for a while ("a spawned agent INHERITS this").
+# The agent itself was told nothing — and it is the one that will act on it: it runs `ls`,
+# reads a disk it has never seen, and reports what it found as the truth about the world.
+# Observed once as "the Bash tool briefly lost access to the working directory"; it had
+# not, it was elsewhere.
+#
+# A bare fact would not carry: an agent that reads "you are on @web-01" has no reason to
+# think anything follows from it. So the note is a small FRAME — what routes the commands,
+# what that means for its own two hands (bash goes there, files stay here), and the way
+# out with its price.
+#
+# ⚠ The price is the part measured rather than assumed. The harness hands a child the
+# PARENT's session_id — documented, and visible in the transcripts it writes: every
+# subagent record carries its parent's sessionId, with the agent's own identity in a
+# separate field the hook never sees. Every file this hook keys on — routing, ticket,
+# warning budget — is therefore ONE slot shared by the parent and by every agent running
+# at that moment. `@local` from a child is not a private choice: it moves everybody. A
+# note that offered it without saying so would hand the child a way to reroute its parent
+# mid-command, which is worse than the silence it was written to end.
+AGENT_FRAME = (
+    "[shunt] Context: a hook named shunt routes this session's bash over ssh to the remote "
+    "host @{alias} — so YOUR bash commands run THERE, not on the local machine. Your file "
+    "tools (Read/Write/Edit/Grep/Glob) are NOT routed; they always work on the LOCAL disk. "
+    "To run bash here instead, send `@local` as a bash command — but that switch is ONE "
+    "setting for the whole session: it also moves the agent that spawned you and any agent "
+    "working beside you, so switch back with `@{alias}` when you are done."
+)
+
+AGENT_FRAME_SEPARATOR = "\n\n---\n"  # the note is an ADDITION, never part of the task
+
+# How big the Agent reply may get. Every other reply this hook writes is a line or two of
+# its own making; this one hands the child's ENTIRE prompt back, so its size belongs to
+# the caller — a long brief is ordinary. The harness caps a hook's output (documented at
+# ~10k characters), and a reply cut in half is not JSON: the harness then logs a parse
+# error, treats it as non-blocking and runs the ORIGINAL call — which would cost the
+# PARENT the warning it has been getting all along. So an oversized reply degrades to that
+# warning alone. The number is deliberately under the documented cap; if the real limit
+# turns out to be different, the direction of the mistake is a note not written, never a
+# warning lost.
+AGENT_REPLY_BUDGET = 9000
+
+
+def _prompt_plus(tool_input, note):
+    """The Agent call's input with `note` appended to its prompt — None when there is none.
+
+    The WHOLE input is handed back, not the one field that changed: `updatedInput` is
+    documented as replacing a tool's arguments, and an Agent call whose `subagent_type`
+    went missing on the way through a hook is a far worse failure than an unwritten note.
+    Copied rather than mutated, because what is not ours to keep is not ours to alter.
+
+    None when there is no string prompt to append to (a shape we have not seen; the input
+    belongs to the harness and may grow). The caller then leaves the call untouched — the
+    parent's warning still goes out, and nothing is put in front of the child that we
+    cannot see the whole of.
+    """
+    prompt = tool_input.get("prompt")
+    if not isinstance(prompt, str):
+        return None
+    updated = dict(tool_input)
+    updated["prompt"] = prompt + AGENT_FRAME_SEPARATOR + note
+    return updated
+
+
+def _tell_the_spawn_and_its_parent(alias, tool_input):
+    """One reply, two readers: the note to the child, the warning to the parent. Never returns.
+
+    Both, and in the same breath, because they are one event seen from two sides — the
+    parent decides whether the spawn belongs on that machine, the child needs to know
+    which machine it is standing on. Sent through one JSON object the way the Bash path
+    already sends a rewrite and a notice together.
+
+    ⚠ No permissionDecision, deliberately: this hook has no business granting a spawn that
+    the caller's own permission rules might want to stop — the note is a note, not a pass.
+    That form is not documented (every example pairs the two), so it was MEASURED, the way
+    emit() was. Verified against the harness (2.1.226): a routed session was given a
+    session id of its own, spawned one agent, and the child's transcript held the caller's
+    prompt with this note appended — `subagent_type` intact, the parent's warning in the
+    same reply. updatedInput is applied without a permission decision.
+    """
+    parent = (
+        f"⚠ shunt: you are on @{alias} — a spawned agent INHERITS this and will run "
+        "its bash there, reading absent local files as facts. Switch with "
+        f"`@local` first, or make sure the agent is meant to work on {alias}."
+    )
+    updated = _prompt_plus(tool_input, AGENT_FRAME.format(alias=alias))
+    if updated is None:
+        warn(parent)  # exits: nothing to write into, so only the parent is told
+    reply = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "updatedInput": updated,
+                "additionalContext": parent,
+            }
+        }
+    )
+    if len(reply) > AGENT_REPLY_BUDGET:
+        warn(parent)  # exits: too big to be read back, so the older, smaller word goes out
+    print(reply)
+    sys.exit(0)
+
+
+def warn_if_off_mode(tool, sid, tool_input=None):
     """Warn when a tool that ignores @host mode runs while the session is remote."""
+    # The TYPE and not just the emptiness: this input comes from the harness and its shape
+    # is not ours. A `tool_input` that is not a dict would raise inside _prompt_plus, and
+    # main() swallows that — costing the parent a warning it used to get every time. The
+    # note is the new thing here; the warning is not, and it may not be lost to it.
+    if not isinstance(tool_input, dict):
+        tool_input = {}
     alias = read_target(sid)
     if alias is BROKEN_TARGET:
         # Neither local nor a host: the file that says where this session is routed is
@@ -407,6 +516,10 @@ def warn_if_off_mode(tool, sid):
             # one Grep would spend it and the next agent would be born into silence. What
             # it inherits is worse than a wrong disk, too: while the routing is unreadable
             # main() refuses every bash command, so the agent works with no bash at all.
+            # ⊸ and no note into the child's prompt here, unlike the remote case below:
+            # this state ANNOUNCES itself to the child at once — its very first bash
+            # command comes back refused, with the two ways out named. The remote state is
+            # the silent one, where commands succeed on a machine nobody mentioned.
             warn(
                 "⚠ shunt: this session's routing state is unreadable — whether you are "
                 "local or on a host cannot be said, and a spawned agent INHERITS that "
@@ -425,14 +538,10 @@ def warn_if_off_mode(tool, sid):
     if not alias:
         return  # local — nothing to warn about
     if tool == "Agent":
-        # Every spawn matters: the agent inherits the mode and reads missing local
-        # files as facts about the world. Observed once as "the Bash tool briefly
-        # lost access to the working directory" — it had not; it was elsewhere.
-        warn(
-            f"⚠ shunt: you are on @{alias} — a spawned agent INHERITS this and will run "
-            "its bash there, reading absent local files as facts. Switch with "
-            f"`@local` first, or make sure the agent is meant to work on {alias}."
-        )
+        # Every spawn matters, and both ends of it: the parent chooses, the child acts.
+        # No once-per-anything budget here — each spawn is a new agent that has been told
+        # nothing, and a budget shared with the file tools would let one Grep silence it.
+        _tell_the_spawn_and_its_parent(alias, tool_input)  # never returns
     if tool in LOCAL_DISK_TOOLS and not _warned_before(sid, alias):
         warn(
             f"⚠ shunt: you are on @{alias}, but {tool} works on the LOCAL disk — the mode covers "
@@ -589,48 +698,195 @@ def irreversible_in(cmd):
     return found
 
 
-def _just_switched(sid, alias):
-    """True on the FIRST command after `@alias`, and only that one.
+def _switch_marker_file(sid):
+    """Where the one-shot switch marker lives — named once, because four places touch it.
 
-    Remembered in a file next to the session's other state, the same shape as
-    _warned_before: the switch arms the marker, the first command spends it. TWO riders
-    sit on that one fact — the reminder (remote_notice) and the far side's housekeeping
-    (_remote_script) — which is why it is read in exactly one place; the other half of
-    that is in remote_notice.
-
-    Once and not per command, for both of them: a repeated line would be wallpaper — and
-    wallpaper is silent exactly when it needs to speak — and a repeated sweep would be a
-    `find` over someone's disk, several times a minute, to delete nothing. The case the
-    reminder exists for is "I forgot I had switched", which lives in that one command too.
+    `@alias` arms it, the next command spends it, `@local` takes it away, and the failure
+    to spend it has to NAME it. A path composed in four places is one rename away from a
+    marker that is written where nobody reads it.
     """
-    path = os.path.join(CONF, "switched." + sid)
+    return os.path.join(CONF, "switched." + sid)
+
+
+LOCAL_MARK = "@local"  # what `@local` writes into the marker — see _arm_switch_marker
+
+
+def _arm_switch_marker(sid, value):
+    """Put the one-shot ticket in place — "" when it lands, the COMPLAINT when it does not.
+
+    ONE function for both directions, because they are one fact: the next command is the
+    first one after a switch, and it owes the caller a word about WHERE it is about to
+    run. `@alias` writes the alias; `@local` writes LOCAL_MARK.
+
+    LOCAL_MARK carries an `@`, which no alias can: `@local` is caught before the alias
+    branch, so the string can never arrive here as a host name. That is what lets one file
+    hold both tickets — and it means the LAST switch wins, which is exactly the semantics
+    wanted: @web-01 → @local leaves the local ticket standing, never both.
+
+    The failure used to be swallowed ("a missing marker may not cost the switch" — still
+    true, the switch stands either way). But the loss is real and silent: no reminder on
+    the next command, and on the remote side no once-per-switch housekeeping at all — the
+    sweep of dead sessions' files and the ONE probe that says whether this session can
+    remember its working directory. A session then works for hours with a cwd that is
+    silently not being written. So the switch stands AND the failure is said.
+    """
+    path = _switch_marker_file(sid)
+    try:
+        with open(path, "w") as f:
+            f.write(value)
+    except Exception as e:
+        return (
+            f"\n⚠ shunt: cannot write {path} ({getattr(e, 'strerror', None) or e}) — your shunt "
+            "config dir is broken (disk/FS?), fix it now. Until then this switch gets no "
+            "first-command reminder, and the far side's once-per-switch housekeeping does not run."
+        )
+    return ""
+
+
+def _spend_switch_marker(sid, expect):
+    """Read the switch ticket and punch it: (armed, unspent).
+
+    `armed` — the marker stands and names THIS host: no command has spent it yet.
+    `unspent` — "" when the marker was taken away, the REASON when it could not be (the
+    shape _clear_routing already uses for the same kind of answer).
+
+    TWO facts and not one, because two riders sit on this marker and a failed removal
+    does not owe them the same thing:
+      · the REMINDER ("this runs THERE, not here") rides on `armed`. It guards the one
+        moment a session acts on the wrong machine out of habit, and while the marker
+        stands that moment has NOT passed — so a repeated line is true, not wallpaper.
+      · the far side's HOUSEKEEPING (sweep + probe, see _remote_script) rides on the
+        marker being SPENT. It is paid for once per switch; on a marker that cannot be
+        removed it would become a `find` over someone else's disk on every command,
+        several times a minute, for the rest of the session.
+    They used to share ONE boolean, taken from the read, with the removal's failure
+    thrown away — so a config dir that cannot delete gave both riders a free ride on
+    every command from that point on, the sweep included.
+
+    The failure is SAID every time (see remote_notice), deliberately without the
+    once-per-value budget every other line here is kept on: such a budget is itself a
+    file in this directory, and this directory is the broken thing. There is nowhere to
+    remember "already said" — and for a fault of the class "fix it now", repeating IS the
+    behaviour that fits.
+
+    A marker naming ANOTHER host is left alone rather than cleaned up in passing: it is
+    not this command's ticket, and it cannot arrive through the hook anyway — `@alias`
+    overwrites the marker, and it is only armed after the routing write has landed.
+
+    `expect` is the alias in remote mode and LOCAL_MARK in local mode: one ticket, read by
+    whichever side the session is on.
+
+    ⚠ ABSENT and UNREADABLE are THREE states with "ours", not two. Absent is the ordinary
+    command — by far the common case, and it must stay silent. Unreadable (a directory in
+    its place, a mode nobody can read) used to fall into the same `except` and answer "not
+    armed": the ticket could then never be spent, so the reminder never came, the far
+    side's housekeeping never ran, and nothing anywhere said why. It is now its own answer,
+    and deliberately NOT folded into "armed": a hook that cannot read a file may not say
+    "first command since `@local`" to a session that never switched, and it may certainly
+    not BUY the far side's housekeeping — a `find … -delete` over someone else's disk — on
+    a ticket nobody has read. Unreadable answers not-armed and complains; the removal is
+    still attempted, because a marker that can never be read must at least be able to go
+    away, or the session has no reminders for the rest of its life.
+    """
+    path = _switch_marker_file(sid)
+    unreadable = ""
     try:
         with open(path) as f:
-            fresh = f.read().strip() == alias
-    except Exception:
-        return False
+            armed = f.read().strip() == expect
+    except FileNotFoundError:
+        return False, "", ""  # no marker — the ordinary command, nothing to spend or say
+    except Exception as e:
+        armed, unreadable = False, (getattr(e, "strerror", None) or str(e))
+    if not armed and not unreadable:
+        return False, "", ""  # someone else's ticket — not ours to spend or to clean up
     try:
         os.remove(path)
-    except OSError:
-        pass  # best-effort: a repeated reminder beats a crash
-    return fresh
+    except OSError as e:
+        return armed, (e.strerror or str(e)), unreadable
+    return armed, "", unreadable
 
 
-def remote_notice(sid, alias, cmd, switched):
+def _ticket_notice(sid, switch, where, armed, unspent, unreadable, also_lost=""):
+    """The lines the one-shot ticket owes the caller — the same ones in both directions.
+
+    ONE place, because it is one piece of knowledge said twice: the first command after a
+    switch does not run where the last one did, and a ticket that cannot be punched is a
+    broken config dir that has to be named. Only the WHERE differs (`there` / `here`) and
+    what else the failure costs — the far side has housekeeping riding on the same ticket,
+    the local side has nothing over there to keep.
+
+    A marker that could not be READ leaves with a line of its own and nothing else: the
+    reminder cannot be given (nobody knows whose ticket it was, and inventing one would be
+    the hook claiming what it has not read), so a line that pointed "above" would point at
+    nothing. It says the whole thing by itself, including whether it will be back.
+    """
+    if unreadable:
+        again = (
+            "it STANDS, so this repeats on every command" if unspent else "it has been taken away, so this is said once"
+        )
+        return [
+            f"⚠ shunt: cannot read {_switch_marker_file(sid)} ({unreadable}) — the switch "
+            "ticket could not be spent, so nothing will be said about which machine this "
+            "command runs on; " + again + ". Your shunt config dir is broken (disk/FS?) — "
+            "fix it now."
+        ]
+    lines = []
+    if armed:
+        tail = "(repeats until the marker below is gone)" if unspent else "(said once per switch)"
+        lines.append(f"ℹ shunt: first command since `{switch}` — {where} {tail}")
+    if unspent:
+        lines.append(
+            f"⚠ shunt: cannot remove {_switch_marker_file(sid)} ({unspent}) — the switch "
+            "marker STANDS. Your shunt config dir is broken (disk/FS?) — fix it now. "
+            f"Until it is gone this line and the one above repeat on every command{also_lost}."
+        )
+    return lines
+
+
+def local_notice(sid, armed, unspent, unreadable=""):
+    """What to say before a command runs HERE — "" when there is nothing.
+
+    The mirror of remote_notice, and it exists for a moment observed in a session working
+    across two hosts: "sometimes I forget where I am". Going home is a switch like any
+    other, and the command right after it is the one that acts out of habit — the habit
+    just points the other way. Without this line the dance @a → @b → local → @c announced
+    its every step except the one that comes back.
+
+    No irreversible-check rides here. On the far machine that warning guards a mistake of
+    PLACE — a command meant for one machine landing on another; at home the caller is on
+    the machine they type on, and a line before every local `rm` is the wallpaper the two
+    narrow cases above IRREVERSIBLE exist to prevent.
+    """
+    return "\n".join(
+        _ticket_notice(sid, LOCAL_MARK, "this one runs HERE, on the local machine.", armed, unspent, unreadable)
+    )
+
+
+def remote_notice(sid, alias, cmd, armed, unspent, unreadable=""):
     """What to say before this command leaves for @alias — "" when there is nothing.
 
-    `switched` is handed IN rather than asked here: the same one-shot fact also decides
-    what the remote script does with that command (its housekeeping rides on it), and the
-    marker can only be spent once — whoever asked first would silently starve the other.
+    The marker's two facts are handed IN rather than asked here: spending it is a one-shot
+    act (see _spend_switch_marker) and the far side's housekeeping reads the same answer —
+    whoever asked first would silently starve the other.
+
+    `unspent` is only ever non-empty together with `armed` — the marker has to be ours
+    before there is anything to remove — which is what lets the second line point at the
+    first one.
 
     ⚠ `cmd` is the command as the CALLER typed it, never the rewritten one. The rewrite
     carries our own `find … -delete` on a switch, which irreversible_in() would report as
     the caller's doing — a warning about a command nobody wrote teaches the reader to skip
     the ones that matter.
     """
-    lines = []
-    if switched:
-        lines.append(f"ℹ shunt: first command since `@{alias}` — it runs THERE, not here. (said once per switch)")
+    lines = _ticket_notice(
+        sid,
+        f"@{alias}",
+        "it runs THERE, not here.",
+        armed,
+        unspent,
+        unreadable,
+        ", and the far side's once-per-switch housekeeping is skipped",
+    )
     hits = irreversible_in(cmd)
     if hits:
         lines.append(
@@ -639,6 +895,44 @@ def remote_notice(sid, alias, cmd, switched):
             "first if it is this one."
         )
     return "\n".join(lines)
+
+
+def _probe_line(host, sid, alias):
+    """What the switch message says about the machine — the tail of "mode: REMOTE → …".
+
+    The switch STANDS in every case, including the one where nothing answers. That is the
+    decision, not an oversight: a host may be rebooting, and a session that has said where
+    it wants to be should not be sent home behind its own back. What changes is that the
+    caller is told now, while they are thinking about the machine, instead of in the
+    middle of the next piece of work.
+
+    Three answers, because probe_host has three: it answered · it did not · it could not
+    be asked. The last one may not be dressed as either of the others — the hook never
+    states what it has not verified.
+
+    ⚠ What the failing line may claim, and what it may not. A failed `ssh … true` proves
+    exactly one thing: THIS CHECK did not get through. It does not prove the host is down —
+    a refused key, a changed host key and a broken login shell all answer from a machine
+    that is perfectly awake. So the line names what was seen and hands the cause to the
+    detail, which comes from ssh itself. A cause guessed in the loudest line sends the
+    reader to look in the wrong place.
+
+    ⊸ The price of asking, said plainly: `@alias` used to take milliseconds and now takes
+      as long as the probe does, up to PROBE_DEADLINE. A session interrupted inside that
+      window gets no message at all while the routing IS already written — the switch is
+      recorded before the probe for exactly that reason, and the armed ticket is what
+      covers the silence: the next command still says "first command since `@alias` — it
+      runs THERE".
+    """
+    try:
+        answered, detail = probe_host(host, sid)
+    except Exception as e:  # the probe may never cost the switch its message
+        return f" — could not check whether it answers ({getattr(e, 'strerror', None) or e})"
+    if answered:
+        return " — connected"
+    if answered is None:
+        return f" — could not check whether it answers ({detail})"
+    return f" — switch written, but @{alias} did not answer the check — nothing will run until it does. {detail}"
 
 
 def resolve_host(alias):
@@ -704,11 +998,14 @@ def _state_write(sid):
     return f"{{ mkdir -m 700 -p {REMOTE_STATE_DIR}; pwd > {_state_file(sid)}; }} 2>/dev/null"
 
 
-def _remote_script(cmd, sid, switched=False):
+def _remote_script(cmd, sid, housekeeping=False):
     """What runs on the far machine: restore the cwd → (housekeeping) → arm the trap → run.
 
-    `switched` marks the FIRST command after `@alias` — the single moment a session pays
-    for housekeeping, and the only place it can be paid: the write is silenced on every
+    `housekeeping` is bought by a SPENT switch marker — the first command after `@alias`,
+    and only if that command actually took the marker away (see _spend_switch_marker: on a
+    marker that cannot be removed this would run on every command instead of once). It is
+    the single moment a session pays for housekeeping, and the only place it can be paid:
+    the write is silenced on every
     other command, so a home that cannot be written to would cost the session its memory
     of every `cd` without a word. Once per switch it is PROBED instead — the same write
     the trap will do, out loud when it fails. A line on every command would be wallpaper,
@@ -741,7 +1038,7 @@ def _remote_script(cmd, sid, switched=False):
         " >&2; cd ~; }",
         "unset __shunt_cwd",
     ]
-    if switched:
+    if housekeeping:
         lines.append(REMOTE_STATE_TRIM)
         lines.append(
             f'{_state_write(sid)} || echo "shunt: cannot write" {REMOTE_STATE_DIR} '
@@ -756,29 +1053,29 @@ def _remote_script(cmd, sid, switched=False):
     return "\n".join(lines) + "\n" + cmd
 
 
-def ssh_command(host, cmd, sid, switched=False):
-    """ssh + ControlMaster; cwd is kept per session via a remote state-file.
+def ssh_opts(host, sid):
+    """The ssh options every connection this hook makes shares — ONE place.
 
-    ⚠ The ControlMaster socket below is the one path here that stays in /tmp, and on
-    purpose: it is a LOCAL file, it is meant to die with the machine, and a unix socket
-    path has ~104 characters to live in. The cwd state-file is the FAR side's and lives in
-    that side's home — see REMOTE_STATE_DIR. The two are not twins.
+    Two connections are made from here: the REWRITE that carries the caller's command,
+    and the PROBE that asks whether the host answers (see probe_host). They must be the
+    same options or the probe tests a path the command does not take — a green probe over
+    a key the command will not use is worth less than no probe at all.
 
-    Deliberately NO -tt, even though it would fix the one thing this transport does not
-    do — killing a command on the far side when the local ssh dies. Measured and
-    rejected: a pty makes `python3 -` (how `edit`/`commit` deliver their helper) never
-    see EOF, so those commands hang; every pager and stdin reader hangs with them; and
-    a controlling terminal EXISTS, so any program can open /dev/tty and block. That last
-    one is why a list of workarounds cannot close it. An interrupted command keeps
-    running there until it ends on its own — use `shunt bg` for long work.
+    ⚠ The ControlMaster socket is the one path here that stays in /tmp, and on purpose:
+    it is a LOCAL file, it is meant to die with the machine, and a unix socket path has
+    ~104 characters to live in. The cwd state-file is the FAR side's and lives in that
+    side's home — see REMOTE_STATE_DIR. The two are not twins.
+
+    The THIRD copy of this knowledge is the CLI's own ssh_opts (cli.py). It cannot be
+    imported — the rewritten command runs in a sandbox that has no files of ours — so the
+    two are kept aligned by a test instead (tests/test_ssh_opts.py), which is also where
+    the socket's `%r` was found missing.
     """
-    key = host["key"]
     sock = f"/tmp/shunt-cm-{sid}-%r@%h:%p.sock"  # per-session AND PER-DESTINATION
     # (%r/%h/%p filled in by ssh, same shape as the CLI's) — otherwise @web-01 then @web-02
     # in the same session share one socket and commands go to the wrong host. %r is the
     # USER: two aliases onto one machine with different accounts (the config allows it)
     # would otherwise ride the first one's master and run as the wrong account.
-    remote = _remote_script(cmd, sid, switched)
     opts = [
         "-o",
         "StrictHostKeyChecking=accept-new",
@@ -791,8 +1088,149 @@ def ssh_command(host, cmd, sid, switched=False):
         "-o",
         "BatchMode=yes",
     ]
-    if key:
-        opts = ["-i", key] + opts
+    if host["key"]:
+        opts = ["-i", host["key"]] + opts
+    return opts
+
+
+# ── does the far machine answer? ──────────────────────────────────────────────
+# A switch used to be a note in a local file and nothing more: `@web-01` announced REMOTE
+# whether or not anything was listening over there, and the first command was what
+# discovered the host was down — an ssh error in the middle of other work, read as a
+# failure of that work. The moment a caller is thinking ABOUT the machine is the moment
+# to tell them it is not answering, so the switch asks.
+PROBE_TIMEOUT = 3  # seconds for the handshake — a switch is rare, but it may not hang
+PROBE_DEADLINE = PROBE_TIMEOUT + 2  # …and for everything ConnectTimeout does not bound
+
+
+def probe_host(host, sid):
+    """Ask @alias whether it answers: (verdict, detail).
+
+    `verdict` is True (it answered), False (it did not) or None — the probe itself could
+    not run. THREE states, because "could not ask" is not "does not answer": announcing a
+    dead host on the strength of a probe that never left this machine is exactly the hook
+    stating what it has not verified.
+
+    `detail` is the REASON, already attributed to whoever owns it: ssh's own last line
+    when it said anything, our own words when the deadline was ours. It carries the whole
+    of what is known about a failure — "no route to host" and "Permission denied
+    (publickey)" are both a failed probe and nothing else about them is alike, so the line
+    above it may not guess between them.
+
+    The far side runs `true`: the cheapest thing that proves a shell was reached.
+
+    ⚠ stdout/stderr go to DEVNULL and a FILE — never a pipe. With ControlPersist the
+    master puts itself in the BACKGROUND holding whatever descriptors it inherited, so a
+    pipe would keep us reading until it exits (five minutes), and the deadline below would
+    fire on the healthiest case there is: a host that answered on the first connection.
+
+    The master it opens is deliberately the one the next command wants, so a switch also
+    WARMS the tunnel. Best-effort by nature — the rewritten command runs in a sandbox that
+    may not share this /tmp — and nothing here depends on it: an unused master closes
+    itself after ControlPersist.
+
+    subprocess and tempfile are imported HERE, not at the top: measured, the two cost
+    ~15 ms of import on every run of this hook — that is every bash command of the session
+    — and this function runs on a switch. The rest of the file is deliberately cheap for
+    the same reason (see audit).
+    """
+    import subprocess
+    import tempfile
+
+    argv = ["ssh"] + ssh_opts(host, sid) + ["-o", f"ConnectTimeout={PROBE_TIMEOUT}", host["target"], "true"]
+    try:
+        with tempfile.TemporaryFile() as err:
+            done = subprocess.run(
+                argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err, timeout=PROBE_DEADLINE
+            )
+            err.seek(0)
+            said = _last_line(err.read().decode("utf-8", "replace"))
+        if done.returncode == 0:
+            return True, ""
+        # An ssh that fails silently is rare and worth naming as such — a reader given a
+        # bare "did not answer" with no reason will look for the reason, and there is none.
+        if not said:
+            return False, f"ssh exited {done.returncode} and said nothing"
+        # The attribution is the point ("this is ssh talking, not the tool") — but ssh's
+        # own failures already open with it: "ssh: connect to host … Connection timed
+        # out" would come back as "ssh: ssh: connect to host …". Attribute what is not
+        # attributed yet. Auth failures are the other shape ("user@host: Permission
+        # denied (publickey)") and still need the prefix — hence the test, not a strip.
+        return False, said if said.startswith("ssh: ") else f"ssh: {said}"
+    except subprocess.TimeoutExpired:
+        return False, f"no answer within {PROBE_DEADLINE}s — the deadline is ours, not ssh's"
+    except Exception as e:  # no ssh binary, no /tmp to write in — we did not ask
+        return None, getattr(e, "strerror", None) or str(e)
+
+
+def _last_line(text, limit=160):
+    """The last thing ssh said, trimmed — the line that carries the reason.
+
+    Last and not first: the warnings come first ("Permanently added … to the list of
+    known hosts") and the failure comes last. Trimmed, because this rides in a message a
+    human reads at the moment of switching, not in a log.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return lines[-1][:limit]
+
+
+# ── the one thing this hook can say about what came BACK ──────────────────────
+# The hook builds a command and never sees its result — every other message here is
+# written before anything runs. This one is the exception, and it is not an exception to
+# the rule: the rewritten command is OUR string, so a line of shell inside it can look at
+# the exit code once ssh has returned. Nothing is read from the far side; only the number
+# ssh itself hands back locally.
+#
+# 255 is the code ssh reserves for its OWN failures — connect refused, no route, host
+# key, auth. It is also what a session gets when the machine goes down mid-work, and
+# there the number is at its most misleading: nothing was delivered, yet the caller reads
+# 255 as a verdict from their own program and goes looking for a bug in it.
+# ⚠ "almost certainly" and not "never ran": a remote command is free to exit 255 on its
+#   own account (rare, but real — ssh does not own the number, it only prefers it), and
+#   this hook does not state what it has not verified.
+TRANSPORT_FAILURE = (
+    "[shunt] exit 255 = ssh transport failure — @{alias} is down or unreachable; your "
+    "command almost certainly never ran. Check the host, or @local."
+)
+
+
+def _transport_epilogue(alias):
+    """The LOCAL tail after the ssh call: speak on 255, hand the code on untouched.
+
+    Local by necessity — the far side is precisely what is missing when this fires, so
+    the far side's trap cannot be the one to say it.
+
+    `rc` is taken first and spent last, the same shape as the far side's trap: the
+    sentence we put in front of the caller's exit code may not change it. Everything
+    between the two is either a test or an echo to stderr.
+
+    The variable is namespaced (`__shunt_rc`) for the reason the far side's `__shunt_cwd`
+    is: this runs in a shell that belongs to someone else's command, and a bare `rc` is a
+    name they may already be using.
+    """
+    said = shlex.quote(TRANSPORT_FAILURE.format(alias=alias))
+    return f'; __shunt_rc=$?; [ "$__shunt_rc" -eq 255 ] && echo {said} >&2; exit "$__shunt_rc"'
+
+
+def ssh_command(host, cmd, sid, housekeeping=False):
+    """ssh + ControlMaster; cwd is kept per session via a remote state-file.
+
+    The tail after the ssh call is LOCAL shell, not part of the payload — see
+    _transport_epilogue. It is the last thing in the string on purpose: anything after
+    `exit` would not run.
+
+    Deliberately NO -tt, even though it would fix the one thing this transport does not
+    do — killing a command on the far side when the local ssh dies. Measured and
+    rejected: a pty makes `python3 -` (how `edit`/`commit` deliver their helper) never
+    see EOF, so those commands hang; every pager and stdin reader hangs with them; and
+    a controlling terminal EXISTS, so any program can open /dev/tty and block. That last
+    one is why a list of workarounds cannot close it. An interrupted command keeps
+    running there until it ends on its own — use `shunt bg` for long work.
+    """
+    remote = _remote_script(cmd, sid, housekeeping)
+    opts = ssh_opts(host, sid)
     return (
         REWRITE_MARKER
         + "ssh "
@@ -801,6 +1239,7 @@ def ssh_command(host, cmd, sid, switched=False):
         + shlex.quote(host["target"])
         + " "
         + shlex.quote(remote)
+        + _transport_epilogue(host["alias"])
     )
 
 
@@ -816,7 +1255,8 @@ def main():
     # @host mode, so they get a warning instead of nothing.
     if tool != "Bash":
         try:
-            warn_if_off_mode(tool, sid)  # exits via warn() when it has something to say
+            # the input rides along for Agent, whose prompt the note is written into
+            warn_if_off_mode(tool, sid, data.get("tool_input") or {})  # exits when it speaks
         except Exception:
             pass  # fail-open: never break someone else's tool
         sys.exit(0)
@@ -860,23 +1300,65 @@ def main():
                 "Session is STILL REMOTE; the next command still runs THERE, not here. "
                 "Fix it and retry `@local`."
             )
-        # best-effort: remove active-host sidecar for this session
+        # the sidecar that names this session's host: nothing in here reads it, which is
+        # exactly why its failure has to be said. It is written FOR the outside — a status
+        # line, a person looking into the config dir — and a stale one tells them this
+        # session is still on @X while it is home. Absent is the ordinary case (the session
+        # was never remote) and stays silent.
+        trouble = ""
+        active_file = os.path.join(CONF, "active-host." + sid)
         try:
-            os.remove(os.path.join(CONF, "active-host." + sid))
-        except OSError:
+            os.remove(active_file)
+        except FileNotFoundError:
             pass
+        except OSError as e:
+            # The name is looked for in the FILE first and in the routing second: a SECOND
+            # `@local` after a failed one has already cleared the routing, so `alias_before`
+            # is "" and a message whose whole job is to name a host would name none. When
+            # the file itself is the unreadable thing (a directory in its place), the
+            # routing still knows. Neither → say "a host" rather than print an empty @.
+            named = ""
+            try:
+                with open(active_file) as f:
+                    named = f.read().strip()
+            except Exception:
+                pass
+            if not named and alias_before and alias_before is not BROKEN_TARGET:
+                named = alias_before
+            named = f"@{named}" if named else "a host"
+            trouble += (
+                f"\n⚠ shunt: cannot remove {active_file} ({e.strerror or e}) — your shunt "
+                "config dir is broken (disk/FS?), fix it now. Until then that file still "
+                f"names {named}, and anything reading it will take this session for routed there."
+            )
         # forget the file-tool warning too → entering remote mode again warns again
+        warned_file = os.path.join(CONF, "warned." + sid)
         try:
-            os.remove(os.path.join(CONF, "warned." + sid))
-        except OSError:
-            pass
-        # and the armed switch-marker: there is no far machine left to point at, or to
-        # keep house on
-        try:
-            os.remove(os.path.join(CONF, "switched." + sid))
-        except OSError:
-            pass
-        echo("[shunt] mode: LOCAL")
+            os.remove(warned_file)
+        except FileNotFoundError:
+            pass  # nothing was ever warned in this session — nothing to forget
+        except OSError as e:
+            # The one line that will ever point at this: a marker that stays behind still
+            # names @X, so the NEXT time this session goes to @X _warned_before answers
+            # "already told" and the file tools go back to reading the LOCAL disk with
+            # nobody saying so — the very silence that warning exists to end, returning
+            # by way of a file nobody could delete. Said with the PATH and the REASON,
+            # because "cannot delete" is a broken disk/FS and not a shunt policy.
+            # It rides on the LOCAL line below rather than replacing it: echo() exits,
+            # and the mode this session is now in is the more urgent of the two facts.
+            trouble += (
+                f"\n⚠ shunt: cannot remove {warned_file} ({e.strerror or e}) — your shunt "
+                "config dir is broken (disk/FS?), fix it now. Until then this session "
+                "will NOT be warned again that Read/Grep stay on the LOCAL disk when it "
+                "goes remote."
+            )
+        # and the ticket: the marker is not cleared, it CHANGES SIDES. Coming home is a
+        # switch like any other, and the command right after it deserves the same word the
+        # command after `@alias` gets — the mistake it guards is the same one, pointing the
+        # other way. LOCAL_MARK overwrites whatever host the marker named, so the far side's
+        # housekeeping cannot be spent by a session that is no longer out there.
+        trouble += _arm_switch_marker(sid, LOCAL_MARK)
+        echo("[shunt] mode: LOCAL" + trouble)
         sys.exit(0)
     elif s == "@status":
         t = read_target(sid)
@@ -935,12 +1417,12 @@ def main():
             )
         # arm the one-shot marker: the command AFTER a switch is the one that forgets it,
         # and the one that pays for the far side's housekeeping — see _remote_script
-        try:
-            with open(os.path.join(CONF, "switched." + sid), "w") as f:
-                f.write(alias)
-        except Exception:
-            pass  # a missing marker may not cost the switch
-        echo(f"[shunt] mode: REMOTE → {alias} ({host['target']})")
+        trouble = _arm_switch_marker(sid, alias)
+        # …and ASK the machine, now that the state is settled. Deliberately after the write:
+        # the switch is recorded whatever the answer, so a host that is merely booting can
+        # be waited for, and a probe that hangs cannot cost the session its routing.
+        verdict = _probe_line(host, sid, alias)
+        echo(f"[shunt] mode: REMOTE → {alias} ({host['target']}){verdict}{trouble}")
         sys.exit(0)
 
     # --- remote execution ---
@@ -976,17 +1458,31 @@ def main():
             pass
         audit(sid, alias, cmd)
         try:
-            # ONE question, two riders: the note below and the once-per-switch
-            # housekeeping inside the script. Asked HERE because the answer is spent —
-            # _just_switched removes the marker it reads.
-            switched = _just_switched(sid, alias)
-            notice = remote_notice(sid, alias, cmd, switched)
+            # ONE marker, TWO facts: the note rides on it STANDING, the far side's
+            # once-per-switch housekeeping only on it being SPENT. Asked HERE, in one
+            # place, because the spending happens in the asking.
+            armed, unspent, unreadable = _spend_switch_marker(sid, alias)
+            notice = remote_notice(sid, alias, cmd, armed, unspent, unreadable)
         except Exception:
             # fail-quiet: neither a note nor a sweep may cost the command its rewrite —
             # an unrewritten command runs HERE, on the machine the caller believes they left
-            switched, notice = False, ""
-        emit(ssh_command(host, cmd, sid, switched), notice)
+            armed, unspent, notice = False, "", ""
+        # Only a SPENT ticket buys housekeeping. A marker still standing would buy it
+        # again on the next command, and the one after that — a `find` over someone
+        # else's disk, several times a minute, for as long as the session lives.
+        emit(ssh_command(host, cmd, sid, armed and not unspent), notice)
 
+    # --- local execution: nothing is rewritten, and once per `@local` that is SAID ---
+    # The command runs here either way; the only question is whether the caller knows it.
+    # A session that never switched has no ticket and hears nothing — which is every
+    # ordinary local session, and the silence there is the point.
+    try:
+        armed, unspent, unreadable = _spend_switch_marker(sid, LOCAL_MARK)
+        notice = local_notice(sid, armed, unspent, unreadable)
+    except Exception:
+        notice = ""  # fail-quiet: a note may never cost a local command its run
+    if notice:
+        warn(notice)  # exits, allowing the command — the note rides in, nothing is touched
     sys.exit(0)
 
 

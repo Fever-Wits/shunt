@@ -12,7 +12,9 @@ Coverage:
   - switching host re-arms the file-tool warning
   - the irreversible warning does not fire on a redirect to /dev/null, and still does
     on a redirect to a file — the idiom must not turn the line into wallpaper
-  - @local clears it, so entering remote mode again warns again
+  - @local clears it, so entering remote mode again warns again — and SAYS SO, with the
+    path and the reason, when that one removal fails (a silent failure here costs the
+    next remote session its only warning)
   - nothing is warned about while local
   - unknown tools are ignored
   - warnings never block: always exit 0, always "additionalContext"
@@ -281,6 +283,76 @@ class TestFileToolWarning(unittest.TestCase):
             run_hook(c, "Read", {"file_path": "/a"}, sid="s1")
             _, out = run_hook(c, "Read", {"file_path": "/a"}, sid="s2")
             self.assertIsNotNone(context_of(out))
+
+
+# ── @local: when the forgetting itself fails ───────────────────────────────────
+
+
+class TestGoingLocalSaysWhenItCannotForget(unittest.TestCase):
+    """`@local` forgets the file-tool warning so that entering remote mode warns again.
+
+    When that removal fails the loss is silent AND it lands far from here: the session
+    goes back to @h1 later, the marker still names it, _warned_before answers "already
+    told" — and Read/Grep read the LOCAL disk with nobody saying a word. That is the
+    exact silence the warning exists to end, restored by a file nobody could delete.
+
+    So it is said, with the PATH and the REASON: "cannot delete" is a broken disk or
+    filesystem, not a shunt policy, and this is the only line that will ever point at it.
+    """
+
+    def _stuck_warned(self, c, sid="s1"):
+        """A `warned.<sid>` that cannot be removed.
+
+        A directory in its place — the shape _clear_routing already documents for the
+        routing file (a torn write, a stray mkdir, a filesystem that lost its mind), and
+        the one that fails the removal without also breaking the routing file's own.
+        Non-empty, so no rmdir could quietly save the day either.
+        """
+        path = os.path.join(c.dir, "warned." + sid)
+        os.makedirs(path)
+        open(os.path.join(path, "in-the-way"), "w").close()
+
+    def _go_local(self, c):
+        """What the caller reads back from `@local` — the hook replaces it with an echo."""
+        _, out = run_hook(c, "Bash", {"command": "@local"})
+        return rewritten_command(out) or ""
+
+    def test_it_names_the_path_and_the_reason(self):
+        with TmpConf() as c:
+            c.route_to("h1")
+            self._stuck_warned(c)
+            said = self._go_local(c)
+            self.assertIn(os.path.join(c.dir, "warned.s1"), said)
+            self.assertIn("Is a directory", said)
+            self.assertIn("fix it now", said)
+
+    def test_it_says_what_the_session_loses(self):
+        """A path and an errno tell an operator WHERE; this tells them what breaks if
+        they leave it — the next remote entry going unwarned."""
+        with TmpConf() as c:
+            c.route_to("h1")
+            self._stuck_warned(c)
+            self.assertIn("LOCAL disk", self._go_local(c))
+
+    def test_the_mode_line_survives_the_complaint(self):
+        """The session really did go local, and that is the more urgent of the two facts —
+        the complaint rides with it instead of replacing it."""
+        with TmpConf() as c:
+            c.route_to("h1")
+            self._stuck_warned(c)
+            self.assertIn("mode: LOCAL", self._go_local(c))
+            self.assertFalse(c.exists("target.s1"))
+
+    def test_an_ordinary_go_local_stays_quiet(self):
+        """The other direction, so the test above cannot pass on a hook that complains
+        every time: nothing to forget, or a marker that goes away, says nothing."""
+        with TmpConf() as c:
+            c.route_to("h1")
+            run_hook(c, "Read", {"file_path": "/a"})  # arms warned.s1 as a plain file
+            said = self._go_local(c)
+            self.assertIn("mode: LOCAL", said)
+            self.assertNotIn("fix it now", said)
+            self.assertFalse(c.exists("warned.s1"))
 
 
 # ── the irreversible warning: the idiom vs the real thing ──────────────────────

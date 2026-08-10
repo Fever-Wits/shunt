@@ -24,6 +24,9 @@ Coverage:
     that says the memory is lost — both only on the first command after `@alias`
   - the marker's whole life through the HOOK: `@alias` arms it, the first command spends
     it, `@local` clears it
+  - a marker that CANNOT be spent (a config dir that cannot delete): the reminder keeps
+    speaking, the housekeeping does not ride, and the failure is said with path + reason
+    on every command — the two riders of one marker, told apart
   - the ControlMaster socket deliberately did NOT move (a local path, ~104 chars to live in)
 """
 
@@ -68,10 +71,10 @@ class FakeHome:
     def state(self, sid):
         return os.path.join(self.dir(), "cwd-" + sid)
 
-    def run(self, cmd, sid, switched=False):
+    def run(self, cmd, sid, housekeeping=False):
         """Execute the payload the way the far shell would, with our $HOME."""
         return subprocess.run(
-            ["bash", "-c", pretool._remote_script(cmd, sid, switched)],
+            ["bash", "-c", pretool._remote_script(cmd, sid, housekeeping)],
             env={"HOME": self.home, "PATH": os.environ.get("PATH", "/usr/bin:/bin")},
             capture_output=True,
             text=True,
@@ -116,8 +119,8 @@ class TestThePath(unittest.TestCase):
             self.assertNotIn(os.path.expanduser("~"), text)
 
     def test_the_script_is_valid_shell(self):
-        for switched in (False, True):
-            script = pretool._remote_script("echo hi", "sess-1", switched)
+        for housekeeping in (False, True):
+            script = pretool._remote_script("echo hi", "sess-1", housekeeping)
             check = subprocess.run(["bash", "-n"], input=script, capture_output=True, text=True)
             self.assertEqual(check.returncode, 0, check.stderr)
 
@@ -129,9 +132,9 @@ class TestThePath(unittest.TestCase):
         """
         import shlex
 
-        for switched in (False, True):
-            cmd = pretool.ssh_command(HOST, "ls", "sess-1", switched)
-            self.assertIn(shlex.quote(pretool._remote_script("ls", "sess-1", switched)), cmd)
+        for housekeeping in (False, True):
+            cmd = pretool.ssh_command(HOST, "ls", "sess-1", housekeeping)
+            self.assertIn(shlex.quote(pretool._remote_script("ls", "sess-1", housekeeping)), cmd)
 
 
 # ── what the far shell actually does with it ───────────────────────────────────
@@ -195,7 +198,7 @@ class TestOnTheFarSide(unittest.TestCase):
     def test_the_exit_code_survives_the_switch_housekeeping_too(self):
         """The sweep and the probe run BEFORE the command; neither may become its code."""
         with FakeHome() as h:
-            self.assertEqual(h.run("exit 7", "sess-rc2", switched=True).returncode, 7)
+            self.assertEqual(h.run("exit 7", "sess-rc2", housekeeping=True).returncode, 7)
 
 
 # ── the restore has to say when it cannot land ─────────────────────────────────
@@ -315,7 +318,7 @@ class TestHostileSessionId(unittest.TestCase):
     def test_a_hostile_id_survives_the_switch_shape_as_well(self):
         """The switch shape puts the same path through two more places."""
         with FakeHome() as h:
-            out = h.run("true", "a$(echo OWNED)b", switched=True)
+            out = h.run("true", "a$(echo OWNED)b", housekeeping=True)
             self.assertNotIn("OWNED", out.stdout + out.stderr)
 
 
@@ -354,21 +357,21 @@ class TestUnwritableHome(unittest.TestCase):
         """Once per `@alias` — the moment the session is orienting anyway."""
         with FakeHome() as h:
             os.chmod(h.home, 0o500)
-            out = h.run("true", "sess-ro", switched=True)
+            out = h.run("true", "sess-ro", housekeeping=True)
             self.assertIn("will not remember", out.stderr)
             self.assertIn("shunt", out.stderr)
 
     def test_the_probe_is_silent_on_a_healthy_home(self):
         """A line on the way in, every switch, would be the wallpaper we are avoiding."""
         with FakeHome() as h:
-            out = h.run("echo ok", "sess-ok", switched=True)
+            out = h.run("echo ok", "sess-ok", housekeeping=True)
             self.assertEqual(out.stderr, "")
             self.assertEqual(out.stdout.strip(), "ok")
 
     def test_the_switch_command_still_runs_and_keeps_its_code(self):
         with FakeHome() as h:
             os.chmod(h.home, 0o500)
-            out = h.run("echo alive; exit 3", "sess-ro", switched=True)
+            out = h.run("echo alive; exit 3", "sess-ro", housekeeping=True)
             self.assertIn("alive", out.stdout)
             self.assertEqual(out.returncode, 3)
 
@@ -387,7 +390,7 @@ class TestTheSweep(unittest.TestCase):
 
     def test_the_sweep_rides_only_on_the_switch(self):
         self.assertNotIn("-delete", pretool._remote_script("ls", "sess-1"))
-        self.assertIn("-delete", pretool._remote_script("ls", "sess-1", switched=True))
+        self.assertIn("-delete", pretool._remote_script("ls", "sess-1", housekeeping=True))
 
     def test_it_drops_the_dead_and_keeps_the_living(self):
         with FakeHome() as h:
@@ -395,7 +398,7 @@ class TestTheSweep(unittest.TestCase):
             for name in ("cwd-dead", "cwd-alive"):
                 open(os.path.join(h.dir(), name), "w").close()
             self._age(os.path.join(h.dir(), "cwd-dead"), 40)
-            h.run("true", "sess-sweep", switched=True)
+            h.run("true", "sess-sweep", housekeeping=True)
             left = sorted(os.listdir(h.dir()))
             self.assertIn("cwd-alive", left)
             self.assertNotIn("cwd-dead", left)
@@ -407,7 +410,7 @@ class TestTheSweep(unittest.TestCase):
             stranger = os.path.join(h.dir(), "notes.txt")
             open(stranger, "w").close()
             self._age(stranger, 400)
-            h.run("true", "sess-sweep2", switched=True)
+            h.run("true", "sess-sweep2", housekeeping=True)
             self.assertTrue(os.path.exists(stranger))
 
     def test_our_own_cwd_is_read_before_the_sweep(self):
@@ -419,7 +422,7 @@ class TestTheSweep(unittest.TestCase):
             with open(h.state("sess-old"), "w") as f:
                 f.write("/usr\n")
             self._age(h.state("sess-old"), 40)
-            out = h.run("pwd", "sess-old", switched=True)
+            out = h.run("pwd", "sess-old", housekeeping=True)
             self.assertEqual(out.stdout.strip(), "/usr")
             self.assertTrue(os.path.exists(h.state("sess-old")))
 
@@ -428,15 +431,25 @@ class TestTheSweep(unittest.TestCase):
 
 
 class HookConf:
-    """A temp SHUNT_CONF with one host, plus the session files the hook reads."""
+    """A temp SHUNT_CONF with one host, plus the session files the hook reads.
+
+    The stub `ssh` rides along because `@alias` probes the host it switches to; no test
+    here is about a live machine, and none may knock on one.
+    """
 
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-cwd-conf-")
         with open(os.path.join(self.dir, "shunt.toml"), "w") as f:
             f.write('[hosts]\nh1 = "root@10.0.0.1"\n')
+        self.bin = os.path.join(self.dir, "_bin")
+        os.makedirs(self.bin)
+        with open(os.path.join(self.bin, "ssh"), "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(os.path.join(self.bin, "ssh"), 0o755)
         return self
 
     def __exit__(self, *_):
+        os.chmod(self.dir, 0o700)  # a frozen-dir test must still be able to clean up
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def exists(self, name):
@@ -451,6 +464,15 @@ class HookConf:
         with open(os.path.join(self.dir, "switched." + sid), "w") as f:
             f.write(alias)
 
+    def freeze(self):
+        """A config dir nothing can be added to or removed from — a broken disk, in one call.
+
+        The files already in it stay READABLE, which is the state that matters here: the
+        marker can still be read and can no longer be spent, exactly as a full or
+        read-only filesystem leaves it.
+        """
+        os.chmod(self.dir, 0o500)
+
 
 def run_hook(conf, command, sid="s1"):
     """Run pretool.py exactly as the harness does. Returns the parsed hook output.
@@ -460,7 +482,7 @@ def run_hook(conf, command, sid="s1"):
     on sys.path, and the test runner's PYTHONPATH would hide that.
     """
     payload = {"tool_name": "Bash", "session_id": sid, "tool_input": {"command": command}}
-    env = dict(os.environ, SHUNT_CONF=conf.dir)
+    env = dict(os.environ, SHUNT_CONF=conf.dir, PATH=conf.bin + os.pathsep + os.environ["PATH"])
     env.pop("PYTHONPATH", None)
     r = subprocess.run([sys.executable, PRETOOL], input=json.dumps(payload).encode(), capture_output=True, env=env)
     out = r.stdout.decode().strip()
@@ -470,7 +492,7 @@ def run_hook(conf, command, sid="s1"):
 class TestTheSwitchMarkerLifecycle(unittest.TestCase):
     """`switched.<sid>` from birth to death, through main() and nothing hand-placed.
 
-    Everything above drives the far-side script directly, with `switched` passed in as an
+    Everything above drives the far-side script directly, with `housekeeping` passed in as an
     argument — which proves what the marker BUYS and never that the hook writes or removes
     one. If `@alias` stopped arming it, the far side's housekeeping would go unpaid forever
     and every other test in this file would still be green.
@@ -486,14 +508,21 @@ class TestTheSwitchMarkerLifecycle(unittest.TestCase):
     # where the note and the sweep are shown to be spent together. Two drivers for one
     # fact in one file is knowledge kept twice.
 
-    def test_going_local_clears_an_unspent_marker(self):
-        """There is no far machine left to point at, or to keep house on. Left behind, it
-        would be spent by the first command of the NEXT switch — housekeeping on a host
-        that never armed it, and none on the one that did."""
+    def test_going_local_takes_the_marker_off_the_host(self):
+        """`@local` used to REMOVE the marker; it now re-points it at the local side.
+
+        What must not survive is the HOST's ticket: left naming @h1, it would be spent by
+        the first command of the next switch — housekeeping on a host that never armed it,
+        and none on the one that did. That is unchanged. What is new is that the way home
+        arms a ticket of its own (see tests/test_pretool_local_ticket.py), so the marker
+        exists and no longer names a machine.
+        """
         with HookConf() as c:
             run_hook(c, "@h1")
             run_hook(c, "@local")
-            self.assertFalse(c.exists("switched.s1"))
+            with open(os.path.join(c.dir, "switched.s1")) as f:
+                self.assertEqual(f.read().strip(), pretool.LOCAL_MARK)
+            self.assertNotIn("h1", pretool.LOCAL_MARK)
 
 
 # ── the hook may not warn about a command the caller never wrote ───────────────
@@ -538,6 +567,150 @@ class TestTheHookDoesNotWarnAboutItself(unittest.TestCase):
             self.assertNotIn("-delete", out["updatedInput"]["command"])
             self.assertEqual(out.get("additionalContext"), None)
             self.assertFalse(c.exists("switched.s1"))
+
+
+# ── when the ticket cannot be punched ──────────────────────────────────────────
+
+
+class TestAMarkerThatCannotBeSpent(unittest.TestCase):
+    """The ticket is read but cannot be punched — a config dir that cannot delete.
+
+    Both riders used to sit on ONE boolean taken from the READ, with the removal's
+    failure thrown away. So a broken config dir meant the marker never went away and
+    every command from then on was treated as the first after a switch: a `find … -delete`
+    over someone ELSE's disk, several times a minute, and nobody told.
+
+    They are told apart now, and each gets what it is owed:
+      · the reminder REPEATS — the moment it guards ("I forgot I had switched") lasts
+        exactly as long as the marker stands, so the repetition is true, not wallpaper;
+      · the housekeeping does NOT run — it is bought by a spent ticket only;
+      · the failure is SAID, with the path and the reason, on every command. There is no
+        once-per-X budget for it on purpose: every such budget is a file in the very
+        directory that is broken.
+    """
+
+    def setUp(self):
+        if os.geteuid() == 0:
+            self.skipTest("root ignores the permissions this test rests on")
+
+    def _stuck(self, c):
+        """A session on @h1 whose armed marker can be read and cannot be removed."""
+        c.route_to("h1")
+        c.arm_switch("h1")
+        c.freeze()
+
+    def test_the_command_still_leaves_for_the_host(self):
+        """First and loudest: a broken config dir may not cost the rewrite. An
+        unrewritten command runs HERE, on the machine the caller believes they left."""
+        with HookConf() as c:
+            self._stuck(c)
+            out = run_hook(c, "ls -la")
+            self.assertIn("ssh ", out["updatedInput"]["command"])
+            self.assertIn("root@10.0.0.1", out["updatedInput"]["command"])
+
+    def test_the_housekeeping_does_not_ride(self):
+        """The sweep is bought by a SPENT ticket. On a marker that stands it would ride
+        on this command, and on every command after it — a `find` over a foreign disk."""
+        with HookConf() as c:
+            self._stuck(c)
+            self.assertNotIn("-delete", run_hook(c, "ls")["updatedInput"]["command"])
+
+    def test_it_does_not_ride_on_the_next_command_either(self):
+        """The one that used to be free: with the marker still standing, every command
+        looked like the first after a switch."""
+        with HookConf() as c:
+            self._stuck(c)
+            run_hook(c, "ls")
+            self.assertNotIn("-delete", run_hook(c, "ls")["updatedInput"]["command"])
+
+    def test_the_failure_names_the_path_and_the_reason(self):
+        """Neither half can be dropped: the path is which file to remove by hand, the
+        reason is whether this is permissions, a full disk, or a filesystem gone."""
+        with HookConf() as c:
+            self._stuck(c)
+            context = run_hook(c, "ls").get("additionalContext", "")
+            self.assertIn(os.path.join(c.dir, "switched.s1"), context)
+            self.assertIn("Permission denied", context)
+            self.assertIn("fix it now", context)
+
+    def test_the_failure_is_said_on_every_command(self):
+        """No budget, deliberately: the store a budget would live in is the broken thing.
+        For a fault of the class "fix it now", repeating is the correct behaviour."""
+        with HookConf() as c:
+            self._stuck(c)
+            run_hook(c, "ls")
+            self.assertIn("fix it now", run_hook(c, "ls").get("additionalContext", ""))
+
+    def test_the_reminder_repeats_while_the_marker_stands(self):
+        """It guards the moment a session acts on the wrong machine out of habit. While
+        the marker stands that moment has not passed — and the caller has not been told
+        once, because the line that would have told them is the one that failed."""
+        with HookConf() as c:
+            self._stuck(c)
+            run_hook(c, "ls")
+            self.assertIn("first command since", run_hook(c, "ls").get("additionalContext", ""))
+
+    def test_the_repeated_reminder_does_not_claim_to_be_said_once(self):
+        """A line that repeats may not promise it was said once — parentheses that lie
+        teach the reader that all of the hook's parentheses are decoration."""
+        with HookConf() as c:
+            self._stuck(c)
+            self.assertNotIn("said once per switch", run_hook(c, "ls").get("additionalContext", ""))
+
+    def test_a_healthy_switch_says_it_once_and_does_not_complain(self):
+        """The other direction, so none of the above can pass on a hook that simply
+        shouts on every switch. Only the SHAPE of what a healthy switch says is pinned
+        here — the spend itself is driven above, and one fact wants one driver."""
+        with HookConf() as c:
+            c.route_to("h1")
+            c.arm_switch("h1")
+            context = run_hook(c, "ls")["additionalContext"]
+            self.assertIn("said once per switch", context)
+            self.assertNotIn("fix it now", context)
+
+
+class TestTheTwoFactsOfTheMarker(unittest.TestCase):
+    """_spend_switch_marker, read directly: the split lives in ONE function, between the
+    read and the removal, and the shape of its answer is what keeps the riders apart."""
+
+    def setUp(self):
+        if os.geteuid() == 0:
+            self.skipTest("root ignores the permissions this test rests on")
+
+    def _spend(self, conf_dir, alias="h1", sid="s1"):
+        """Ask the hook's own function, with CONF pointed at the temp dir."""
+        orig, pretool.CONF = pretool.CONF, conf_dir
+        try:
+            return pretool._spend_switch_marker(sid, alias)
+        finally:
+            pretool.CONF = orig
+
+    def test_no_marker_is_neither_armed_nor_a_complaint(self):
+        """The ordinary command — by far the common case, and it must say nothing."""
+        with HookConf() as c:
+            self.assertEqual(self._spend(c.dir), (False, "", ""))
+
+    def test_an_armed_marker_is_spent_cleanly(self):
+        with HookConf() as c:
+            c.arm_switch("h1")
+            self.assertEqual(self._spend(c.dir), (True, "", ""))
+            self.assertFalse(c.exists("switched.s1"))
+
+    def test_a_marker_for_another_host_is_not_ours_to_spend(self):
+        with HookConf() as c:
+            c.arm_switch("h2")
+            self.assertEqual(self._spend(c.dir), (False, "", ""))
+
+    def test_an_unremovable_marker_is_armed_AND_carries_the_reason(self):
+        """The two halves of the answer, in one call: still armed (the reminder is owed),
+        not spent (the housekeeping is not)."""
+        with HookConf() as c:
+            c.arm_switch("h1")
+            c.freeze()
+            armed, unspent, unreadable = self._spend(c.dir)
+            self.assertTrue(armed)
+            self.assertIn("Permission denied", unspent)
+            self.assertEqual(unreadable, "", "a marker that READ fine may not be called unreadable")
 
 
 # ── what deliberately stayed behind ────────────────────────────────────────────

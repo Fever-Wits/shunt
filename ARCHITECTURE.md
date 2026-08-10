@@ -101,18 +101,40 @@ The mode covers **bash and nothing else**: the hook rewrites `Bash` and no other
 tool. File and search tools keep touching the local disk while the session feels
 remote, and a spawned agent inherits the routing and runs its own bash on the far
 machine — reading absent local files as facts about the world. Both failures are
-silent, which is why the wider matcher exists: on every matched non-bash tool the
-hook answers with `additionalContext` and no `updatedInput` — nothing is
-rewritten, only said. That is one of three shapes the reply takes; the other two
-are `updatedInput` alone (the plain rewrite above) and **both in one reply**, when
-a rewritten command carries a note with it (`pretool.emit(command, notice)` — the
-first command after a switch, or one that cannot be taken back). The note rides in
-the same reply as the rewrite deliberately: sent as a reply of its own it would
-return before the rewrite, leaving the command to run here, on the machine the
-caller believes they left.
+silent, which is why the wider matcher exists.
+
+The reply takes **four** shapes, and whether a permission decision rides along is
+part of what tells them apart:
+
+- **`updatedInput` + `permissionDecision: allow`** — the plain rewrite above
+  (`pretool.emit(command)`).
+- **Both fields, same decision** — `pretool.emit(command, notice)`, when a
+  rewritten command carries a note with it: the first command after a switch, or
+  one that cannot be taken back. The note rides in the same reply as the rewrite
+  deliberately: sent as a reply of its own it would return before the rewrite,
+  leaving the command to run here, on the machine the caller believes they left.
+- **`additionalContext` alone, no decision** — `pretool.warn()`, the warning on a
+  local-disk tool. Nothing is rewritten, only said.
+- **Both fields and no decision at all** — the `Agent` spawn
+  (`pretool._tell_the_spawn_and_its_parent`). One reply, two readers: the child's
+  **whole** tool input comes back with a context frame appended to its `prompt`,
+  and the parent's warning rides along as `additionalContext`. The decision is
+  left out on purpose — this hook has no business granting a spawn the caller's
+  own permission rules might want to stop, and a note is not a pass. That
+  combination is undocumented (every published example pairs `updatedInput` with a
+  decision), so it was measured against the harness rather than assumed, the same
+  way `emit()` was. If the child's input carries no string `prompt`, or the reply
+  would outgrow `AGENT_REPLY_BUDGET` (9000 characters, deliberately under the
+  harness's documented ~10k cap for hook output), the frame is dropped and the
+  parent's warning goes out alone: the mistake costs a note not written, never a
+  warning lost.
 
 - **`Agent`** — warned on **every** spawn; each one inherits the mode anew, so a
-  once-per-session warning would miss all the later ones.
+  once-per-session warning would miss all the later ones. The spawn itself is told
+  as well, in that same reply: a short frame is appended to the child's prompt —
+  what routes its bash, that its own file tools stay on the local disk, and that
+  `@local` is one session-wide setting shared with the parent and with any agent
+  working beside it, so switching is never a private choice.
 - **`Read` / `Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Grep` / `Glob`**
   (`pretool.LOCAL_DISK_TOOLS`) — warned **once per host** (state in
   `<conf>/warned.<session_id>`, cleared by `@local`). Keyed by host rather than by
@@ -219,9 +241,21 @@ global "current host".
   `<conf>/target.<session_id>`. Absence means "local"; a file that is present but names
   no host (empty, a directory, unreadable) is a third reading — UNKNOWN: bash is
   refused, never read as local.
-- **`@<alias>`** writes that alias to the session's state file and confirms
-  `REMOTE → <alias> (<target>)`. An unknown alias is reported and changes
-  nothing.
+- **`@<alias>`** writes that alias to the session's state file and then **asks the
+  machine**: a single `ssh … true` with `ConnectTimeout=3` (`PROBE_TIMEOUT`, itself
+  bounded by a `PROBE_DEADLINE` two seconds wider for everything that option does
+  not cover), carrying the **same** ssh options a real command would — a green
+  probe over a key the command will not use is worth less than no probe at all. The
+  confirmation reads `REMOTE → <alias> (<target>) — connected`, or says the host did
+  not answer the check, or that the check could not be made at all: three answers,
+  because a failed `ssh … true` proves only that *this check* did not get through —
+  a refused key, a changed host key and a broken login shell all answer from a
+  machine that is perfectly awake. **The switch stands in every case.** A host may
+  be rebooting, and a session that has said where it wants to be is not sent home
+  behind its own back; the routing is therefore written *before* the probe, so a
+  probe that hangs cannot cost the session its routing. The price, said plainly:
+  `@<alias>` used to take milliseconds and now takes as long as the probe does. An
+  unknown alias is reported and changes nothing.
 - **`@local`** removes the state file (and the active-host sidecar, the warning
   marker and the armed switch marker) → commands run locally again.
 - **`@status`** reports the current mode for this session.
@@ -276,6 +310,15 @@ of output where silence is the contract. The price, plainly: a home that becomes
 unwritable *mid*-session is not reported until the next switch — the hook builds
 a command, it never sees what came back.
 
+It pays only if its ticket was actually punched. Two riders sit on one marker and
+they read it differently: the "this runs THERE" reminder rides on the marker
+**standing**, the housekeeping on it having been **removed**. A config directory
+that cannot delete therefore keeps repeating the line and skips the sweep, rather
+than buying a `find` over someone else's disk on every command for the rest of the
+session. Going home arms the same ticket — `@local` writes its own mark into it —
+and the first command after that gets the mirrored reminder, with no far side to
+keep house on.
+
 ⚠ That state lives on the **far** machine, in the **landing account's** home, and
 carries the session id in its name — so it is per session **and** per host **and**
 per account. Switching `@web-01 → @web-02` inside one session carries no directory
@@ -329,10 +372,24 @@ that blows regularly is a retention policy in disguise. Two honest limits: what
 falls out is gone for good, and parallel sessions append to one file, so a trim
 coinciding with another session's append can lose a record or two.
 
-### The rewrite marker
+### What wraps the payload — the marker, and the epilogue
 
 Every rewritten command is prefixed with the bash comment line
 `#shunt-rewritten`, which is what the double-rewrite guard of §3 looks for.
+
+It also has a **tail**, and the tail runs **locally**: after the ssh call comes
+`__shunt_rc=$?`, a test for **255**, and `exit "$__shunt_rc"`. 255 is the code ssh
+reserves for its own failures, and bare it is indistinguishable from a verdict by the
+caller's own program — so on 255 alone one line goes to stderr naming the transport and
+the host, and the exit code is then handed on untouched. This is the only thing the hook
+says about what came *back*: it never reads the far side (nothing here can — the hook
+builds a command and never sees a result), only the number the local ssh process leaves
+behind. Position matters: nothing may follow the `exit`, so the epilogue is the last
+thing in the string.
+
+The far side's own exit code reaches that point through the `trap … EXIT` of
+*Working-directory persistence* above — taken first, spent last — so neither the trap's
+bookkeeping nor the epilogue's sentence can change what the caller's command returned.
 
 ---
 
@@ -487,9 +544,14 @@ line (`CONFLICT` / `SKIP`) and sets a non-zero exit code, but the remaining file
 are still pushed. A manifest entry outliving its host is ordinary rather than
 exceptional, and one stale entry must not abandon everything queued behind it.
 
-⚠ Asymmetric size guard: `SHUNT_EDIT_MAX_BYTES` (64 MiB) caps the **push**
-direction — `shunt edit` and `shunt commit`. `shunt checkout` has **no** cap; it
-`cat`s whatever is there. Check the size of a remote file before checking it out.
+⚠ Asymmetric size guard: `SHUNT_EDIT_MAX_BYTES` (default 64 MiB) is read by the
+helpers **on the far host**, so a value exported locally never reaches it — ssh
+carries no environment. The two helpers measure different things: for
+`shunt edit` it is the **remote file being opened** (`st_size`), for
+`shunt commit` the **content being sent** (raw bytes at the limit, with an
+inflated base64 payload rejected before decoding, at twice it). `shunt checkout`
+has **no** cap; it `cat`s whatever is there. Check the size of a remote file
+before checking it out.
 
 ### Transfers
 
@@ -535,8 +597,14 @@ target.<session_id>        active alias for a session; absent = local; present b
                              bash is refused, never read as local
 active-host.<session_id>   sidecar: current routing target (for status displays)
 warned.<session_id>        the host this session was already warned about (see §3)
-switched.<session_id>      armed by `@<alias>`, spent by the first command after it —
-                             the one that pays the far side's housekeeping (see §5)
+switched.<session_id>      the one-shot ticket, armed in BOTH directions: `@<alias>`
+                             writes the alias, `@local` writes the mark `@local` — one
+                             file, so the last switch wins. The first command after it
+                             spends it and says where it is about to run (there, or
+                             HERE). Only a spending that SUCCEEDS pays the far side's
+                             once-per-switch housekeeping: a ticket that cannot be
+                             removed keeps repeating its line and buys nothing, and a
+                             local ticket has no far side to keep house on (see §5)
 audit.log                  one record per command sent to a host (hook and CLI alike),
                              one line each — a multi-line command is folded
 checkouts/manifest.json    checked-out files: local path → host, remote path, base SHA
