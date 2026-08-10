@@ -1,7 +1,7 @@
 """
 Tests for shunt.cli — the `bg` subcommand (long jobs on a host, via systemd-run).
 
-Three silences met here, of the same shape: a first step whose failure nobody looks at,
+Four silences met here, of the same shape: a first step whose failure nobody looks at,
 and a second step that speaks as if it had succeeded.
 
   --stop  ran `systemctl stop JOB; …; echo stopped`. The `;` let the stop fail and the
@@ -24,7 +24,16 @@ and a second step that speaks as if it had succeeded.
           arrived with the first commit that tracked this file, and later silent-failure
           passes walked past it. It was measured instead of guessed at, and removed.
 
+  --status ran `systemctl show`, which INVENTS an answer for a unit it has never heard
+          of: every property at its default — Result=success, SubState=dead,
+          ExecMainStatus=0 — at exit 0. A mistyped job name was therefore indistinguishable
+          from a job that had finished cleanly, in the one hand here that runs with nobody
+          watching the screen. LoadState is what tells them apart.
+
 Coverage:
+  - --status refuses to dress a unit that is not there as a job that succeeded, names it,
+    and still shows what systemd said — contradicted rather than hidden
+  - a host that cannot answer at all (no systemd, no permission) says THAT instead
   - --stop ties both the word and the exit code to what systemctl actually did
   - a stop that fails says nothing about having stopped anything
   - the fire-and-forget cleanup (reset-failed) stays fire-and-forget, inside the success
@@ -61,7 +70,7 @@ class TmpHosts:
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-bg-")
         with open(os.path.join(self.dir, "shunt.toml"), "w") as f:
-            f.write('[hosts]\nh1 = "root@10.0.0.1"\n')
+            f.write('[hosts]\nh1 = "root@203.0.113.1"\n')
         self._orig = shunt_mod.CONF
         shunt_mod.CONF = self.dir
         return self
@@ -266,6 +275,77 @@ class TestNameNeedsALabel(unittest.TestCase):
         with TmpHosts():
             script, _ = bg_with_stubbed_ssh(["@h1", "sleep 60", "--name", "Nightly Build!"])
         self.assertIn("--unit=shunt-nightly-build", script)
+
+
+# ── the fourth silence: --status on a unit that does not exist ─────────────────
+
+
+class TestStatusOfAJobThatIsNotThere(unittest.TestCase):
+    """`systemctl show` INVENTS an answer for a unit it has never heard of.
+
+    Every property comes back at its default — `Result=success`, `SubState=dead`,
+    `ExecMainStatus=0` — and it exits 0 while doing it. So a mistyped job name read exactly
+    like a job that had finished cleanly: the same shape as the three silences above, in
+    the hand that runs with nobody watching the screen. LoadState is the one property that
+    tells them apart, and it is asked as a QUESTION rather than merely printed, because a
+    listing is read by a human and an exit code by a script.
+    """
+
+    def script_for(self, job="shunt-nightly"):
+        with TmpHosts():
+            script, _ = bg_with_stubbed_ssh(["@h1", "--status", job])
+        return script
+
+    SYSTEMD_INVENTING_AN_ANSWER = """case "$*" in
+  *LoadState*) echo "LoadState=not-found"; echo "ExecMainStatus=0"; echo "Result=success";
+               echo "SubState=dead"; exit 0;;
+esac
+exit 0
+"""
+    A_REAL_JOB_THAT_FAILED = """case "$*" in
+  *LoadState*) echo "LoadState=loaded"; echo "ExecMainStatus=3"; echo "Result=exit-code";
+               echo "SubState=failed"; exit 0;;
+esac
+exit 0
+"""
+
+    def test_a_unit_that_does_not_exist_is_not_a_success(self):
+        r = run_far_side_with_systemctl(self.script_for(), self.SYSTEMD_INVENTING_AN_ANSWER)
+        self.assertNotEqual(r.returncode, 0, "exit 0 here is Result=success theatre")
+
+    def test_it_says_which_job_and_that_the_status_is_about_nothing(self):
+        r = run_far_side_with_systemctl(self.script_for("shunt-typo"), self.SYSTEMD_INVENTING_AN_ANSWER)
+        self.assertIn("no such job shunt-typo", r.stderr)
+        self.assertIn("NOTHING", r.stderr)
+        self.assertIn("--list", r.stderr)
+
+    def test_the_invented_properties_are_still_shown(self):
+        """Not hidden — contradicted. The reader sees what systemd said AND that it was
+        said about a unit that is not there."""
+        r = run_far_side_with_systemctl(self.script_for(), self.SYSTEMD_INVENTING_AN_ANSWER)
+        self.assertIn("Result=success", r.stdout)
+
+    def test_a_real_job_is_untouched(self):
+        """The guard may not cost the ordinary question its answer — including a job that
+        ran and failed, which is a successful ANSWER to a status query."""
+        r = run_far_side_with_systemctl(self.script_for(), self.A_REAL_JOB_THAT_FAILED)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("SubState=failed", r.stdout)
+        self.assertEqual(r.stderr.strip(), "")
+
+    def test_a_host_without_systemd_says_so_and_does_not_pass(self):
+        """The other way the question goes unanswered: no systemd, no permission, a bad
+        invocation. Silence there would read as "no such job" — a different fact."""
+        r = run_far_side_with_systemctl(self.script_for(), "exit 127\n")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("could not ask systemd", r.stderr)
+
+    def test_the_job_name_is_quoted_once_and_used_everywhere(self):
+        """Two questions and two messages carry the same name; a variable is what keeps
+        them from drifting apart, and what keeps a name with a space in one piece."""
+        script = self.script_for("my job")
+        self.assertIn("__shunt_job='my job'", script)
+        self.assertNotIn("systemctl show my job", script)
 
 
 # ── the shapes that were already right stay right ──────────────────────────────

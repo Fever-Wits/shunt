@@ -5,6 +5,99 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
+## [2026081100] — 2026-08-11
+
+One theme again, one step further in: **shunt refusing to answer from something it has not
+read.** The previous release taught it to say which machine you are standing on; this one
+covers the cases where it cannot tell — a hook input that arrives broken, a systemd unit
+that does not exist, a line whose second half cannot run where the first half is going.
+Two entries change behaviour you may have relied on; both are marked ⚠.
+
+### Added
+
+- **The hook now has an answer for an input it cannot read.** ⚠ **Behaviour change.**
+  Everything this hook decides comes out of the JSON the harness hands it, and an
+  unreadable one used to mean silence — after which the harness ran your **original**
+  command. On a session routed to a server, that is the accident the whole tool exists to
+  prevent: `rm -rfv /srv/old-release`, written for the far machine, deleting the local
+  tree, because the one file that could have said "you are routed away" was the file that
+  could not be read. Three answers now, by what can still be told apart:
+
+  - **Nothing parses, or there is no `tool_name`** → the call is **denied**: exit **2**,
+    the reason on stderr. This is the only place in shunt that denies a tool call. With no
+    tool name, a bash command and a file read are the same shape, and only one of them is
+    safe to let through. It costs you the file tools too, in that one state, and the way
+    back in is a terminal outside the session.
+  - **Readable, but `session_id` or the command is missing** → **bash alone** is refused,
+    with the usual sentence in place of your command:
+
+    ```
+    [shunt] hook input incomplete (session_id) — routing unknown, remote commands
+    disabled, command NOT run; fix the hook (file tools still work).
+    ```
+
+  - **`Read` / `Write` / `Edit` / `Grep` / `Glob` / `Agent`** keep working in that second
+    state and are told **every time**. They are harmless on the local disk, and they are
+    what repairs the hook from inside a session that no longer has bash — an `Edit` on
+    `pretool.py` needs no shell at all. The once-per-session budget every other message
+    here is kept on cannot be used: it is a file named after the session, and the session
+    id is what is missing.
+
+- **`bg --status` no longer dresses a missing unit as a finished job.**
+  `systemctl show` invents an answer for a unit it has never heard of — every property at
+  its default, `Result=success`, `SubState=dead`, `ExecMainStatus=0`, at exit 0 — so a
+  mistyped job name was indistinguishable from a clean completion, in the one hand here
+  that runs with nobody watching. `LoadState` is now asked as a question: the properties
+  are still printed, **contradicted rather than hidden**, and the call comes back non-zero:
+
+  ```
+  shunt: no such job shunt-typo on this host — the status above is systemd answering
+  about NOTHING, not about a job that ran. `shunt bg @<host> --list` shows the jobs it knows.
+  ```
+
+  A host that cannot answer at all — no systemd, no permission — says *that* instead, and
+  is not allowed to pass for "no such job".
+
+- **`shunt …` reached after a separator is refused while remote.** The mirror of a guard
+  that already existed for lines *beginning* with `shunt`. A line such as
+  `cat payload.json | shunt edit @web-01 /etc/nginx.conf --stdin` carries no `shunt`
+  prefix, so nothing looked at it, and the whole line was shipped to a machine where
+  `shunt` is not installed. It failed loudly there — which is not the same as clearly:
+  what failed was the `shunt` half, while the half in front of the pipe had already run
+  over there, against the far machine's files. In a local session the same line is
+  ordinary work and still runs.
+
+- **The config directory sweeps itself.** The far side has swept its per-session files
+  since they were introduced; this side never did, so `~/.config/shunt/` collected
+  `active-host.<id>` · `warned.<id>` · `switched.<id>` for every session that ever went
+  remote. They are now removed once they are 30 days old, on a **switch** — the same rare
+  moment the far side's sweep is paid for, never in front of an ordinary command.
+  `target.<id>` is deliberately **not** swept: it is written once, at the switch, so an old
+  timestamp there means a session that switched a while ago, not a session that is gone —
+  and taking it away would send that session's next command to the local machine without a
+  word.
+
+### Fixed
+
+- **A rewritten command keeps the rest of your request.** ⚠ **Behaviour change, in your
+  favour.** The hook handed the harness only the rewritten `command`, and measurement
+  showed the other fields did not survive the trip: a Bash call carrying
+  `run_in_background: true` and `timeout: 600000` came back in the **foreground**, with the
+  timeout back at its default — so a ten-minute job on a server was cut short for no
+  visible reason. The whole input is now handed back with only `command` changed. (The
+  hook reference describes `updatedInput` as *merged*; the harness measured here
+  *replaced*. Passing everything back is correct under either reading, which is why the
+  fix does not depend on that question.)
+
+- **A session with no `session_id` is no longer routed by somebody else's switch.** The
+  hook fell back to the literal slot `default`, so two sessions arriving without an id
+  shared one routing file — and a switch made by either would send the other's commands to
+  that host. There is no fallback now; that input is refused (see above).
+
+- **Two comments in the source claimed "only Bash is ever rewritten".** It has not been
+  true since a spawned agent's prompt started carrying a frame: `Agent` calls are rewritten
+  too. A stale comment is read far more often than a manual.
+
 ## [2026081009] — 2026-08-10
 
 One theme: shunt saying **which machine you are standing on — before the command, not

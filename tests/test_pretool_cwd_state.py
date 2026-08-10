@@ -46,7 +46,7 @@ from shunt import pretool
 
 # The hook as a file: it runs in its own process, so it is invoked by path.
 PRETOOL = pretool.__file__
-HOST = {"alias": "h", "target": "root@10.0.0.1", "key": None}
+HOST = {"alias": "h", "target": "root@203.0.113.1", "key": None}
 
 
 class FakeHome:
@@ -440,7 +440,7 @@ class HookConf:
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-cwd-conf-")
         with open(os.path.join(self.dir, "shunt.toml"), "w") as f:
-            f.write('[hosts]\nh1 = "root@10.0.0.1"\n')
+            f.write('[hosts]\nh1 = "root@203.0.113.1"\n')
         self.bin = os.path.join(self.dir, "_bin")
         os.makedirs(self.bin)
         with open(os.path.join(self.bin, "ssh"), "w") as f:
@@ -606,7 +606,7 @@ class TestAMarkerThatCannotBeSpent(unittest.TestCase):
             self._stuck(c)
             out = run_hook(c, "ls -la")
             self.assertIn("ssh ", out["updatedInput"]["command"])
-            self.assertIn("root@10.0.0.1", out["updatedInput"]["command"])
+            self.assertIn("root@203.0.113.1", out["updatedInput"]["command"])
 
     def test_the_housekeeping_does_not_ride(self):
         """The sweep is bought by a SPENT ticket. On a marker that stands it would ride

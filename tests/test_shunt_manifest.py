@@ -243,7 +243,7 @@ class TestManifestHelpers(unittest.TestCase):
 
         with TmpConf() as conf:
             with open(os.path.join(conf, "shunt.toml"), "w") as f:
-                f.write('[hosts]\nmyhost = "root@10.0.0.1"\n')
+                f.write('[hosts]\nmyhost = "root@203.0.113.1"\n')
             local = os.path.realpath(shunt_mod._checkout_local_path("myhost", "/remote/file.py"))
             os.makedirs(os.path.dirname(local), exist_ok=True)
             with open(local, "wb") as f:

@@ -68,7 +68,7 @@ class HookConf:
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-target-")
         with open(os.path.join(self.dir, "shunt.toml"), "w") as f:
-            f.write('[hosts]\nh1 = "root@10.0.0.1"\n')
+            f.write('[hosts]\nh1 = "root@203.0.113.1"\n')
         self.bin = os.path.join(self.dir, "_bin")
         os.makedirs(self.bin)
         self.stub_ssh()
@@ -210,7 +210,7 @@ class TestTheOrdinaryLocalSessionIsUntouched(unittest.TestCase):
         with HookConf() as c:
             c.route_to("h1")
             _, out = run_bash(c, "ls -la")
-            self.assertIn("root@10.0.0.1", ran_instead(out))
+            self.assertIn("root@203.0.113.1", ran_instead(out))
 
 
 # ── @status may not answer what it has not read ────────────────────────────────
@@ -269,7 +269,7 @@ class TestTheRemedyStillWorks(unittest.TestCase):
             c.break_routing()
             run_bash(c, "@h1")
             _, out = run_bash(c, "ls")
-            self.assertIn("root@10.0.0.1", ran_instead(out))
+            self.assertIn("root@203.0.113.1", ran_instead(out))
 
 
 # ── the write that could leave a blank behind ──────────────────────────────────
@@ -433,7 +433,7 @@ class SealedConf(HookConf):
     def __enter__(self):
         super().__enter__()
         with open(self.path("shunt.toml"), "w") as f:
-            f.write('[hosts]\nh1 = "root@10.0.0.1"\nh2 = "root@10.0.0.2"\n')
+            f.write('[hosts]\nh1 = "root@203.0.113.1"\nh2 = "root@203.0.113.2"\n')
         return self
 
     def seal(self):
@@ -489,7 +489,7 @@ class TestAFailedSwitchIsSaidOutLoud(unittest.TestCase):
             c.seal()
             run_bash(c, "@h2")
             _, out = run_bash(c, "ls")
-            self.assertIn("root@10.0.0.1", ran_instead(out))
+            self.assertIn("root@203.0.113.1", ran_instead(out))
 
     def test_a_local_session_is_told_it_is_still_local(self):
         with SealedConf() as c:

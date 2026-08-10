@@ -36,7 +36,7 @@ import shunt.cli as shunt_mod
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 
-def install_with_stubbed_ssh(python3_rc=0, connect_rc=0, argv=("root@10.0.0.1", "--alias", "h1")):
+def install_with_stubbed_ssh(python3_rc=0, connect_rc=0, argv=("root@203.0.113.1", "--alias", "h1")):
     """Run cmd_install with both of its ssh calls answered by us.
 
     Returns (exit code, stderr, the remote commands ssh was handed). The exit code is the
@@ -88,7 +88,7 @@ class TestTheConnectionTestIsTheExitCode(unittest.TestCase):
         """An install that fails at the last step must say which machine and how badly —
         the tick that would have named the host is precisely the line that did not print."""
         _, err, _ = install_with_stubbed_ssh(connect_rc=255)
-        self.assertIn("10.0.0.1", err)
+        self.assertIn("203.0.113.1", err)
         self.assertIn("255", err)
         self.assertIn("FAILED", err)
 

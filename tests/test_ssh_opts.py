@@ -37,8 +37,8 @@ class TmpHosts:
             f.write(
                 'key = "/keys/default"\n'
                 "[hosts]\n"
-                'keyed = "root@10.0.0.1"\n'
-                'own = { target = "root@10.0.0.2", key = "/keys/own" }\n'
+                'keyed = "root@203.0.113.1"\n'
+                'own = { target = "root@203.0.113.2", key = "/keys/own" }\n'
             )
         self._orig = shunt_mod.CONF
         shunt_mod.CONF = self.dir
@@ -68,7 +68,7 @@ def rsync_ssh_string(argv):
 
 class TestSingleSource(unittest.TestCase):
     def test_ssh_argv_is_built_from_ssh_opts(self):
-        host = {"alias": "h", "target": "root@10.0.0.1", "key": None}
+        host = {"alias": "h", "target": "root@203.0.113.1", "key": None}
         opts = shunt_mod.ssh_opts(host)
         argv = shunt_mod.ssh_argv(host)
         self.assertEqual(argv, ["ssh"] + opts + [host["target"]])
@@ -120,11 +120,11 @@ class TestKey(unittest.TestCase):
 
     def test_no_key_means_no_i_flag(self):
         """ssh should choose the identity itself, not be handed an empty -i."""
-        host = {"alias": "h", "target": "root@10.0.0.1", "key": None}
+        host = {"alias": "h", "target": "root@203.0.113.1", "key": None}
         self.assertNotIn("-i", shunt_mod.ssh_opts(host))
 
     def test_key_present_means_i_flag(self):
-        host = {"alias": "h", "target": "root@10.0.0.1", "key": "/keys/k"}
+        host = {"alias": "h", "target": "root@203.0.113.1", "key": "/keys/k"}
         opts = shunt_mod.ssh_opts(host)
         self.assertEqual(opts[:2], ["-i", "/keys/k"])
 
@@ -148,20 +148,20 @@ class TestHookControlPath(unittest.TestCase):
         return opt[0]
 
     def test_the_socket_is_keyed_on_the_user(self):
-        self.assertIn("%r", self._controlpath("root@10.0.0.1"))
+        self.assertIn("%r", self._controlpath("root@203.0.113.1"))
 
     def test_the_socket_is_keyed_on_host_and_port_too(self):
-        path = self._controlpath("root@10.0.0.1")
+        path = self._controlpath("root@203.0.113.1")
         self.assertIn("%h", path)
         self.assertIn("%p", path)
 
     def test_the_socket_is_keyed_on_the_session(self):
         """Parallel sessions must not share a master either — that was already true."""
-        self.assertIn("sess-1", self._controlpath("root@10.0.0.1"))
+        self.assertIn("sess-1", self._controlpath("root@203.0.113.1"))
 
     def test_the_hook_and_the_cli_key_on_the_same_things(self):
         """One fact, two homes: whatever one keys on, the other must key on as well."""
-        hook = self._controlpath("root@10.0.0.1")
+        hook = self._controlpath("root@203.0.113.1")
         for token in ("%r", "%h", "%p"):
             self.assertIn(token, shunt_mod.SOCK, f"the CLI dropped {token}")
             self.assertIn(token, hook, f"the hook dropped {token}")

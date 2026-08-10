@@ -25,6 +25,10 @@ Coverage:
     is ordinary work and a refusal there would be pure noise
   - the message names the host, the separator it saw, and the way out
   - a routing state that cannot be read refuses too, without inventing a host
+  - THE MIRROR SHAPE: `shunt …` that is not the first word of the line
+    (`cat f | shunt edit @h1 /x --stdin`) — no prefix, so nothing above ever saw it, and
+    the whole line was shipped to a host where `shunt` does not exist while the half in
+    front of the pipe ran over there on the wrong machine's files
 
 The hook is run as the harness runs it — a subprocess fed JSON on stdin, started BY PATH
 with PYTHONPATH stripped — and SHUNT_CONF points at a temp directory, so no real config or
@@ -58,7 +62,7 @@ class HookConf:
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-prefix-")
         with open(os.path.join(self.dir, "shunt.toml"), "w") as f:
-            f.write('[hosts]\nh1 = "root@10.0.0.1"\n')
+            f.write('[hosts]\nh1 = "root@203.0.113.1"\n')
         return self
 
     def __exit__(self, *_):
@@ -279,6 +283,87 @@ class TestAnUnreadableRoutingState(unittest.TestCase):
             code, out = run_hook(c, "shunt hosts")
             self.assertEqual(code, 0)
             self.assertEqual(out.strip(), "")
+
+
+class TestShuntPastTheStartOfTheLine(unittest.TestCase):
+    """The mirror of everything above: `shunt …` that is NOT the first word.
+
+    `cat payload.json | shunt edit @h1 /etc/nginx.conf --stdin` carries no shunt PREFIX,
+    so the guard above never looks at it — and in remote mode the WHOLE line was rewritten
+    and shipped to a machine where `shunt` is not installed. An older comment called this
+    the loud direction, and it is: "command not found", for a tool the caller has, blamed
+    on a machine they were not thinking about. Loud is not clear, and it is not harmless —
+    the half in FRONT of the pipe had already run over there, silently, on the far
+    machine's files.
+    """
+
+    PIPED = "cat payload.json | shunt edit @h1 /etc/nginx.conf --stdin"
+
+    def refusal(self, line, conf=None):
+        with HookConf() as c:
+            c.route_to("h1")
+            code, out = run_hook(c, line)
+            said = ran_instead(out)
+            self.assertIsNotNone(said, "the hook said nothing — the line went to the host whole")
+            self.assertEqual(code, 0, "a refusal here is a rewrite, not a block")
+            return said
+
+    def test_the_piped_shunt_line_is_refused(self):
+        said = self.refusal(self.PIPED)
+        self.assertIn("NOT run", said)
+
+    def test_nothing_of_the_line_leaves_for_the_host(self):
+        """Neither half: not the `shunt` call that would fail there, and not the `cat`
+        that would read the WRONG machine's copy of the file."""
+        said = self.refusal(self.PIPED)
+        self.assertNotIn("ssh", said)
+        self.assertNotIn("cat payload.json", said)
+
+    def test_the_message_names_the_host_the_separator_and_the_way_out(self):
+        said = self.refusal(self.PIPED)
+        self.assertIn("@h1", said)
+        self.assertIn("`|`", said)
+        self.assertIn("@local", said)
+
+    def test_every_separator_that_can_begin_a_command_is_seen(self):
+        for line in (
+            "echo hi; shunt hosts",
+            "make build && shunt cp @h1 ./out /srv",
+            "cat f | shunt edit @h1 /x --stdin",
+            "echo `shunt hosts`",
+            "echo $(shunt hosts)",
+            "echo hi\nshunt hosts",
+        ):
+            with self.subTest(line=line):
+                self.assertIn("NOT run", self.refusal(line))
+
+    def test_a_newline_is_named_in_words(self):
+        """A raw newline printed into the message would break the sentence in half."""
+        self.assertIn("newline", self.refusal("echo hi\nshunt hosts"))
+
+    def test_a_local_session_is_left_alone(self):
+        """Nothing is routed anywhere, so `shunt` runs here and so does the rest of the
+        line — which is what the caller meant. A refusal here would be pure noise."""
+        with HookConf() as c:
+            code, out = run_hook(c, self.PIPED)
+            self.assertEqual(code, 0)
+            self.assertIsNone(ran_instead(out))
+
+    def test_a_word_that_merely_contains_shunt_is_not_shunt(self):
+        """`shunt` has to be a WORD in command position, or every line mentioning the tool
+        would be refused."""
+        with HookConf() as c:
+            c.route_to("h1")
+            for line in ("ls | myshunt x", "ls | shunt2 x", "ls | grep shunt", "ls /opt/shuntx | wc -l"):
+                with self.subTest(line=line):
+                    _, out = run_hook(c, line)
+                    self.assertIn("ssh", ran_instead(out) or "", "%s should have gone to the host" % line)
+
+    def test_the_price_is_paid_in_the_cheap_direction(self):
+        """A separator inside quotes costs a refusal nobody needed — the same trade the
+        guard above makes, and the same reason: the other direction costs a command that
+        leaves unnoticed."""
+        self.assertIn("NOT run", self.refusal('echo "pipe it: cmd | shunt read @h1 /x"'))
 
 
 if __name__ == "__main__":

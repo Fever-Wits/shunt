@@ -95,25 +95,25 @@ class TestTomlReading(unittest.TestCase):
 
     def test_inline_table_carries_target_and_key(self):
         with TmpConf() as c:
-            c.write("shunt.toml", '[hosts]\nspecial = { target = "root@10.0.0.9", key = "/keys/other" }\n')
+            c.write("shunt.toml", '[hosts]\nspecial = { target = "root@203.0.113.9", key = "/keys/other" }\n')
             host = c.resolve("special")
-            self.assertEqual(host["target"], "root@10.0.0.9")
+            self.assertEqual(host["target"], "root@203.0.113.9")
             self.assertEqual(host["key"], "/keys/other")
 
     def test_leading_at_sign_is_optional(self):
         """`@h1` is how it is typed; the alias is the same host either way."""
         with TmpConf() as c:
-            c.write("shunt.toml", '[hosts]\nh1 = "root@10.0.0.1"\n')
+            c.write("shunt.toml", '[hosts]\nh1 = "root@203.0.113.1"\n')
             self.assertEqual(c.resolve("@h1"), c.resolve("h1"))
 
     def test_unknown_alias_is_none(self):
         with TmpConf() as c:
-            c.write("shunt.toml", '[hosts]\nh1 = "root@10.0.0.1"\n')
+            c.write("shunt.toml", '[hosts]\nh1 = "root@203.0.113.1"\n')
             self.assertIsNone(c.resolve("nope"))
 
     def test_several_hosts_are_all_read(self):
         with TmpConf() as c:
-            c.write("shunt.toml", '[hosts]\na = "root@10.0.0.1"\nb = "root@10.0.0.2"\n')
+            c.write("shunt.toml", '[hosts]\na = "root@203.0.113.1"\nb = "root@203.0.113.2"\n')
             self.assertEqual(sorted(c.hosts()), ["a", "b"])
 
 
@@ -122,7 +122,7 @@ class TestKeys(unittest.TestCase):
 
     def test_top_level_key_is_the_default(self):
         with TmpConf() as c:
-            c.write("shunt.toml", 'key = "/keys/default"\n[hosts]\nh1 = "root@10.0.0.1"\n')
+            c.write("shunt.toml", 'key = "/keys/default"\n[hosts]\nh1 = "root@203.0.113.1"\n')
             self.assertEqual(c.resolve("h1")["key"], "/keys/default")
 
     def test_per_host_key_wins_over_the_default(self):
@@ -130,8 +130,8 @@ class TestKeys(unittest.TestCase):
             c.write(
                 "shunt.toml",
                 'key = "/keys/default"\n[hosts]\n'
-                'h1 = "root@10.0.0.1"\n'
-                'h2 = { target = "root@10.0.0.2", key = "/keys/special" }\n',
+                'h1 = "root@203.0.113.1"\n'
+                'h2 = { target = "root@203.0.113.2", key = "/keys/special" }\n',
             )
             self.assertEqual(c.resolve("h1")["key"], "/keys/default")
             self.assertEqual(c.resolve("h2")["key"], "/keys/special")
@@ -139,13 +139,13 @@ class TestKeys(unittest.TestCase):
     def test_no_key_anywhere_is_none(self):
         """No key configured → ssh picks its own identity, as before."""
         with TmpConf() as c:
-            c.write("shunt.toml", '[hosts]\nh1 = "root@10.0.0.1"\n')
+            c.write("shunt.toml", '[hosts]\nh1 = "root@203.0.113.1"\n')
             self.assertIsNone(c.resolve("h1")["key"])
 
     def test_tilde_is_expanded(self):
         """ssh -i gets a path, not a shell shorthand — nothing expands it later."""
         with TmpConf() as c:
-            c.write("shunt.toml", 'key = "~/.ssh/id_test"\n[hosts]\nh1 = "root@10.0.0.1"\n')
+            c.write("shunt.toml", 'key = "~/.ssh/id_test"\n[hosts]\nh1 = "root@203.0.113.1"\n')
             self.assertEqual(c.resolve("h1")["key"], os.path.expanduser("~/.ssh/id_test"))
 
 
@@ -187,49 +187,49 @@ class TestLegacyFallback(unittest.TestCase):
 
     def test_legacy_file_is_read_when_no_toml(self):
         with TmpConf() as c:
-            c.write("hosts", "h1 ssh root@10.0.0.1\n")
-            self.assertEqual(c.resolve("h1")["target"], "root@10.0.0.1")
+            c.write("hosts", "h1 ssh root@203.0.113.1\n")
+            self.assertEqual(c.resolve("h1")["target"], "root@203.0.113.1")
 
     def test_legacy_key_option_is_read(self):
         with TmpConf() as c:
-            c.write("hosts", "h1 ssh root@10.0.0.1 key=~/.ssh/id_legacy\n")
+            c.write("hosts", "h1 ssh root@203.0.113.1 key=~/.ssh/id_legacy\n")
             self.assertEqual(c.resolve("h1")["key"], os.path.expanduser("~/.ssh/id_legacy"))
 
     def test_comments_and_blank_lines_are_ignored(self):
         with TmpConf() as c:
-            c.write("hosts", "# a comment\n\nh1 ssh root@10.0.0.1\n")
+            c.write("hosts", "# a comment\n\nh1 ssh root@203.0.113.1\n")
             self.assertEqual(sorted(c.hosts()), ["h1"])
 
     def test_line_not_naming_ssh_is_not_a_host(self):
         """ssh is the only transport: a line in any other shape carries something that is
         not an ssh target, so it must not silently become one."""
         with TmpConf() as c:
-            c.write("hosts", "h1 ssh root@10.0.0.1\nlan not-ssh 10.0.0.9:8766\n")
+            c.write("hosts", "h1 ssh root@203.0.113.1\nlan not-ssh 203.0.113.9:8766\n")
             self.assertEqual(sorted(c.hosts()), ["h1"])
             self.assertIsNone(c.resolve("lan"))
 
     def test_skipped_line_is_reported(self):
         """A host that vanishes without a word is exactly the silent failure to avoid."""
         with TmpConf() as c:
-            c.write("hosts", "h1 ssh root@10.0.0.1\nlan not-ssh 10.0.0.9:8766\n")
+            c.write("hosts", "h1 ssh root@203.0.113.1\nlan not-ssh 203.0.113.9:8766\n")
             c.hosts()
             self.assertIn("1 line(s) skipped", c.said)
 
     def test_nothing_is_reported_when_nothing_is_skipped(self):
         with TmpConf() as c:
-            c.write("hosts", "h1 ssh root@10.0.0.1\n")
+            c.write("hosts", "h1 ssh root@203.0.113.1\n")
             c.hosts()
             self.assertNotIn("skipped", c.said)
 
     def test_toml_wins_when_both_exist(self):
         with TmpConf() as c:
-            c.write("hosts", "h1 ssh root@10.0.0.1\n")
-            c.write("shunt.toml", '[hosts]\nh1 = "root@10.0.0.99"\n')
-            self.assertEqual(c.resolve("h1")["target"], "root@10.0.0.99")
+            c.write("hosts", "h1 ssh root@203.0.113.1\n")
+            c.write("shunt.toml", '[hosts]\nh1 = "root@203.0.113.99"\n')
+            self.assertEqual(c.resolve("h1")["target"], "root@203.0.113.99")
 
     def test_notice_names_the_new_place(self):
         with TmpConf() as c:
-            c.write("hosts", "h1 ssh root@10.0.0.1\n")
+            c.write("hosts", "h1 ssh root@203.0.113.1\n")
             c.hosts()
             self.assertIn(os.path.join(c.dir, "hosts"), c.said)
             self.assertIn(os.path.join(c.dir, "shunt.toml"), c.said)
@@ -237,7 +237,7 @@ class TestLegacyFallback(unittest.TestCase):
     def test_notice_is_said_once(self):
         """Once per process — a line before every command would become wallpaper."""
         with TmpConf() as c:
-            c.write("hosts", "h1 ssh root@10.0.0.1\n")
+            c.write("hosts", "h1 ssh root@203.0.113.1\n")
             c.hosts()
             c.hosts()
             c.hosts()
@@ -246,7 +246,7 @@ class TestLegacyFallback(unittest.TestCase):
     def test_nothing_is_migrated_automatically(self):
         """Reading the old file must not write the new one behind the owner's back."""
         with TmpConf() as c:
-            c.write("hosts", "h1 ssh root@10.0.0.1\n")
+            c.write("hosts", "h1 ssh root@203.0.113.1\n")
             c.hosts()
             self.assertFalse(os.path.exists(os.path.join(c.dir, "shunt.toml")))
 
@@ -280,76 +280,77 @@ class TestNothingConfigured(unittest.TestCase):
 class TestAddHost(unittest.TestCase):
     def test_creates_the_file(self):
         with TmpConf() as c:
-            shunt_config.add_host(c.dir, "h1", "root@10.0.0.1")
-            self.assertEqual(c.resolve("h1")["target"], "root@10.0.0.1")
+            shunt_config.add_host(c.dir, "h1", "root@203.0.113.1")
+            self.assertEqual(c.resolve("h1")["target"], "root@203.0.113.1")
 
     def test_key_becomes_the_default_of_a_fresh_file(self):
         """The documented idiom: one identity at the top, hosts as bare strings."""
         with TmpConf() as c:
-            shunt_config.add_host(c.dir, "h1", "root@10.0.0.1", "~/.ssh/id_test")
+            shunt_config.add_host(c.dir, "h1", "root@203.0.113.1", "~/.ssh/id_test")
             body = c.read("shunt.toml")
             self.assertIn('key = "~/.ssh/id_test"', body)
-            self.assertIn('h1 = "root@10.0.0.1"', body)
+            self.assertIn('h1 = "root@203.0.113.1"', body)
             self.assertEqual(c.resolve("h1")["key"], os.path.expanduser("~/.ssh/id_test"))
 
     def test_second_host_is_added_next_to_the_first(self):
         with TmpConf() as c:
-            shunt_config.add_host(c.dir, "h1", "root@10.0.0.1")
-            shunt_config.add_host(c.dir, "h2", "root@10.0.0.2")
+            shunt_config.add_host(c.dir, "h1", "root@203.0.113.1")
+            shunt_config.add_host(c.dir, "h2", "root@203.0.113.2")
             self.assertEqual(sorted(c.hosts()), ["h1", "h2"])
 
     def test_same_alias_is_replaced_not_duplicated(self):
         """Idempotent: installing the same machine twice must not fork the truth."""
         with TmpConf() as c:
-            shunt_config.add_host(c.dir, "h1", "root@10.0.0.1")
-            shunt_config.add_host(c.dir, "h1", "root@10.0.0.7")
+            shunt_config.add_host(c.dir, "h1", "root@203.0.113.1")
+            shunt_config.add_host(c.dir, "h1", "root@203.0.113.7")
             self.assertEqual(c.read("shunt.toml").count("h1 ="), 1)
-            self.assertEqual(c.resolve("h1")["target"], "root@10.0.0.7")
+            self.assertEqual(c.resolve("h1")["target"], "root@203.0.113.7")
 
     def test_replacement_stays_in_place(self):
         """The line keeps its position, so the comment above it still describes it."""
         with TmpConf() as c:
-            c.write("shunt.toml", '[hosts]\n# the fast one\nh1 = "root@10.0.0.1"\nh2 = "root@10.0.0.2"\n')
-            shunt_config.add_host(c.dir, "h1", "root@10.0.0.7")
+            c.write("shunt.toml", '[hosts]\n# the fast one\nh1 = "root@203.0.113.1"\nh2 = "root@203.0.113.2"\n')
+            shunt_config.add_host(c.dir, "h1", "root@203.0.113.7")
             body = c.read("shunt.toml").splitlines()
-            self.assertEqual(body.index('h1 = "root@10.0.0.7"'), body.index("# the fast one") + 1)
+            self.assertEqual(body.index('h1 = "root@203.0.113.7"'), body.index("# the fast one") + 1)
 
     def test_comments_and_other_hosts_survive(self):
         """It is the owner's file — an install may not eat what is written in it."""
         with TmpConf() as c:
             c.write(
-                "shunt.toml", '# my machines\nkey = "/keys/default"\n\n[hosts]\n# the fast one\nh1 = "root@10.0.0.1"\n'
+                "shunt.toml",
+                '# my machines\nkey = "/keys/default"\n\n[hosts]\n# the fast one\nh1 = "root@203.0.113.1"\n',
             )
-            shunt_config.add_host(c.dir, "h2", "root@10.0.0.2")
+            shunt_config.add_host(c.dir, "h2", "root@203.0.113.2")
             body = c.read("shunt.toml")
             self.assertIn("# my machines", body)
             self.assertIn("# the fast one", body)
-            self.assertEqual(c.resolve("h1")["target"], "root@10.0.0.1")
+            self.assertEqual(c.resolve("h1")["target"], "root@203.0.113.1")
             self.assertEqual(c.resolve("h2")["key"], "/keys/default")
 
     def test_key_equal_to_the_default_is_not_repeated(self):
         with TmpConf() as c:
             c.write("shunt.toml", 'key = "/keys/default"\n[hosts]\n')
-            line = shunt_config.add_host(c.dir, "h1", "root@10.0.0.1", "/keys/default")
-            self.assertEqual(line, 'h1 = "root@10.0.0.1"')
+            line = shunt_config.add_host(c.dir, "h1", "root@203.0.113.1", "/keys/default")
+            self.assertEqual(line, 'h1 = "root@203.0.113.1"')
 
     def test_differing_key_is_written_per_host(self):
         with TmpConf() as c:
             c.write("shunt.toml", 'key = "/keys/default"\n[hosts]\n')
-            shunt_config.add_host(c.dir, "h1", "root@10.0.0.1", "/keys/other")
+            shunt_config.add_host(c.dir, "h1", "root@203.0.113.1", "/keys/other")
             self.assertEqual(c.resolve("h1")["key"], "/keys/other")
 
     def test_hosts_section_is_created_when_missing(self):
         with TmpConf() as c:
             c.write("shunt.toml", 'key = "/keys/default"\n')
-            shunt_config.add_host(c.dir, "h1", "root@10.0.0.1")
-            self.assertEqual(c.resolve("h1")["target"], "root@10.0.0.1")
+            shunt_config.add_host(c.dir, "h1", "root@203.0.113.1")
+            self.assertEqual(c.resolve("h1")["target"], "root@203.0.113.1")
 
     def test_alias_needing_quotes_stays_one_key(self):
         """A dot in a bare TOML key would nest a table — quote it instead."""
         with TmpConf() as c:
-            shunt_config.add_host(c.dir, "srv.one", "root@10.0.0.1")
-            self.assertEqual(c.resolve("srv.one")["target"], "root@10.0.0.1")
+            shunt_config.add_host(c.dir, "srv.one", "root@203.0.113.1")
+            self.assertEqual(c.resolve("srv.one")["target"], "root@203.0.113.1")
 
     def test_install_writes_the_host(self):
         """The wiring: `shunt install` must actually reach add_host."""
@@ -357,8 +358,8 @@ class TestAddHost(unittest.TestCase):
             with patch.object(shunt_mod.subprocess, "run") as run:
                 run.return_value = subprocess.CompletedProcess([], 0, b"Python 3.11.0", b"")
                 with patch("sys.stdout", new_callable=io.StringIO):
-                    shunt_mod.cmd_install(["root@10.0.0.1", "--alias", "h1", "--key", "~/.ssh/id_test"])
-            self.assertEqual(c.resolve("h1")["target"], "root@10.0.0.1")
+                    shunt_mod.cmd_install(["root@203.0.113.1", "--alias", "h1", "--key", "~/.ssh/id_test"])
+            self.assertEqual(c.resolve("h1")["target"], "root@203.0.113.1")
             self.assertEqual(c.resolve("h1")["key"], os.path.expanduser("~/.ssh/id_test"))
             # written down as typed, so the file travels between machines
             self.assertIn('"~/.ssh/id_test"', c.read("shunt.toml"))
@@ -385,11 +386,11 @@ class TestHookUsesTheSameConfig(unittest.TestCase):
 
     def test_toml_host_is_rewritten_with_target_and_key(self):
         with TmpConf() as c:
-            c.write("shunt.toml", 'key = "/keys/default"\n[hosts]\nh1 = "root@10.0.0.1"\n')
+            c.write("shunt.toml", 'key = "/keys/default"\n[hosts]\nh1 = "root@203.0.113.1"\n')
             with open(os.path.join(c.dir, "target.s1"), "w") as f:
                 f.write("h1")
             cmd = self._run_hook(c.dir, "ls -la")
-            self.assertIn("root@10.0.0.1", cmd)
+            self.assertIn("root@203.0.113.1", cmd)
             self.assertIn("-i /keys/default", cmd)
 
     def test_broken_config_refuses_instead_of_running_here(self):
@@ -416,7 +417,7 @@ class TestHookUsesTheSameConfig(unittest.TestCase):
     def test_renamed_alias_refuses_too(self):
         """The config parses fine — the alias the session sits on is simply not in it."""
         with TmpConf() as c:
-            c.write("shunt.toml", '[hosts]\nweb-02 = "root@10.0.0.2"\n')
+            c.write("shunt.toml", '[hosts]\nweb-02 = "root@203.0.113.2"\n')
             with open(os.path.join(c.dir, "target.s1"), "w") as f:
                 f.write("web-01")  # renamed since the session switched
             cmd = self._run_hook(c.dir, "ls -la")

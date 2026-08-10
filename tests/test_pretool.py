@@ -145,7 +145,7 @@ class TestShuntCliPassthrough(_PretoolBase):
 
 
 class TestSshCommandShape(_PretoolBase):
-    HOSTS_CONTENT = "myhost ssh user@198.51.100.1\n"
+    HOSTS_CONTENT = "myhost ssh user@203.0.113.1\n"
 
     def test_starts_with_rewrite_marker(self):
         h = self.pt.resolve_host("myhost")
@@ -162,7 +162,7 @@ class TestSshCommandShape(_PretoolBase):
     def test_contains_target(self):
         h = self.pt.resolve_host("myhost")
         result = self.pt.ssh_command(h, "ls", "sid123")
-        self.assertIn("user@198.51.100.1", result)
+        self.assertIn("user@203.0.113.1", result)
 
     def test_per_session_socket(self):
         h = self.pt.resolve_host("myhost")
@@ -174,7 +174,7 @@ class TestSshCommandShape(_PretoolBase):
         self.assertNotIn("sess-B", r1)
 
     def test_key_option_included_when_present(self):
-        hosts = "keyhost ssh user@198.51.100.2 key=~/.ssh/id_rsa\n"
+        hosts = "keyhost ssh user@203.0.113.2 key=~/.ssh/id_rsa\n"
         with open(os.path.join(self._tmpdir, "hosts"), "w") as f:
             f.write(hosts)
         import importlib

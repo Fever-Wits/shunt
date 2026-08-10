@@ -55,7 +55,7 @@ class TmpConf:
     this file exactly once, at the bottom, to prove the hook still routes over it.
     """
 
-    CONFIG = ("shunt.toml", '[hosts]\nh1 = "root@10.0.0.1"\nh2 = "root@10.0.0.2"\n')
+    CONFIG = ("shunt.toml", '[hosts]\nh1 = "root@203.0.113.1"\nh2 = "root@203.0.113.2"\n')
 
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-conf-")
@@ -142,7 +142,7 @@ class TestBashUnchanged(unittest.TestCase):
             cmd = rewritten_command(out)
             self.assertIsNotNone(cmd)
             self.assertIn("ssh", cmd)
-            self.assertIn("root@10.0.0.1", cmd)
+            self.assertIn("root@203.0.113.1", cmd)
 
     def test_already_rewritten_command_is_left_alone(self):
         with TmpConf() as c:
@@ -442,8 +442,18 @@ class TestBoundaries(unittest.TestCase):
                 self.assertEqual(code, 0, f"{tool} did not exit 0")
 
     def test_garbage_stdin_does_not_crash(self):
+        """It refuses ON PURPOSE — which is not the same as falling over.
+
+        This test used to assert exit 0, and in doing so it held the defect in place: exit
+        0 on an unreadable input let the harness run the ORIGINAL command, and on a routed
+        session that runs it on the wrong machine. What "does not crash" has to mean here
+        is a decision and a sentence, not a traceback — so both are asserted. The policy
+        itself, in all three of its branches, lives in tests/test_pretool_hook_input.py.
+        """
         r = subprocess.run([sys.executable, PRETOOL], input=b"not json", capture_output=True, env=hook_env())
-        self.assertEqual(r.returncode, 0)
+        self.assertEqual(r.returncode, 2, "exit 0 here would let the original command run")
+        self.assertNotIn("Traceback", r.stderr.decode())
+        self.assertIn("[shunt]", r.stderr.decode())
 
 
 # ── ADDITION: the legacy `hosts` file, walked through the HOOK ─────────────────
@@ -452,7 +462,7 @@ class TestBoundaries(unittest.TestCase):
 class LegacyConf(TmpConf):
     """The same two hosts, written in the OLD `hosts` format."""
 
-    CONFIG = ("hosts", "h1 ssh root@10.0.0.1\nh2 ssh root@10.0.0.2\n")
+    CONFIG = ("hosts", "h1 ssh root@203.0.113.1\nh2 ssh root@203.0.113.2\n")
 
 
 class TestLegacyConfigStillRoutes(unittest.TestCase):
@@ -468,7 +478,7 @@ class TestLegacyConfigStillRoutes(unittest.TestCase):
             c.route_to("h1")
             code, out = run_hook(c, "Bash", {"command": "ls -la"})
             self.assertEqual(code, 0)
-            self.assertIn("root@10.0.0.1", rewritten_command(out))
+            self.assertIn("root@203.0.113.1", rewritten_command(out))
 
 
 if __name__ == "__main__":

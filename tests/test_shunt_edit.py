@@ -50,7 +50,7 @@ class TmpHosts:
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-edit-")
         with open(os.path.join(self.dir, "shunt.toml"), "w") as f:
-            f.write('[hosts]\nh1 = "root@10.0.0.1"\n')
+            f.write('[hosts]\nh1 = "root@203.0.113.1"\n')
         self._orig = shunt_mod.CONF
         shunt_mod.CONF = self.dir
         return self

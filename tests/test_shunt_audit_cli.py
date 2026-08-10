@@ -42,7 +42,7 @@ class TmpConf:
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-audit-cli-")
         with open(os.path.join(self.dir, "shunt.toml"), "w") as f:
-            f.write('[hosts]\nh1 = "root@10.0.0.1"\n')
+            f.write('[hosts]\nh1 = "root@203.0.113.1"\n')
         self._orig_conf = shunt_mod.CONF
         self._orig_manifest = shunt_mod.MANIFEST
         shunt_mod.CONF = self.dir

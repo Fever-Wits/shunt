@@ -314,10 +314,32 @@ def cmd_bg(argv):
     if rest[0] == "--status":
         if len(rest) < 2:
             die("usage: shunt bg @host --status JOB")
-        job = shlex.quote(rest[1])
-        remote = (
-            f"journalctl -u {job} --no-pager -n 60 2>/dev/null; echo '----'; "
-            f"systemctl show {job} -p ExecMainStatus -p ExecMainCode -p Result -p SubState"
+        # `systemctl show` INVENTS an answer for a unit it has never heard of: every
+        # property comes back at its default — Result=success, SubState=dead,
+        # ExecMainStatus=0 — and it exits 0 while doing it. So a mistyped job name read
+        # exactly like a job that had finished cleanly, and this is the hand that works
+        # with nobody watching the screen: there was no second reader to notice. The twin
+        # of the `--stop` fix below (never state what has not been verified) — the word AND
+        # the exit code have to come from what systemd said. LoadState is asked as a
+        # QUESTION, not merely printed among the properties: a line in a listing is read by
+        # a human, an exit code is read by a script, and this hand is used by both. The
+        # name goes through a variable so the two questions and the two messages cannot
+        # drift apart, the way _remote_script does it.
+        remote = "\n".join(
+            [
+                f"__shunt_job={shlex.quote(rest[1])}",
+                'journalctl -u "$__shunt_job" --no-pager -n 60 2>/dev/null',
+                "echo '----'",
+                'systemctl show "$__shunt_job" -p LoadState -p ExecMainStatus -p ExecMainCode'
+                " -p Result -p SubState ||"
+                ' { echo "shunt: could not ask systemd about $__shunt_job on this host" >&2; exit 1; }',
+                'if systemctl show "$__shunt_job" -p LoadState 2>/dev/null | grep -qx LoadState=not-found; then',
+                '  echo "shunt: no such job $__shunt_job on this host — the status above is systemd'
+                " answering about NOTHING, not about a job that ran."
+                ' \\`shunt bg @<host> --list\\` shows the jobs it knows." >&2',
+                "  exit 1",
+                "fi",
+            ]
         )
         return subprocess.run(sa + [remote]).returncode
     if rest[0] == "--stop":
@@ -427,10 +449,15 @@ HOOK_MATCHER = "Bash|Agent|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob"
 def _print_hook_hint():
     """hook instruction (we do NOT touch someone else's settings.json automatically).
 
-    The matcher is wider than Bash on purpose. Only Bash is ever rewritten; the rest are
-    matched so the hook can WARN that the mode does not cover them (see pretool.py). Print
-    the narrow one and a fresh install silently loses those warnings — which is how this
-    was found: the local setup only had them because a human had widened it by hand.
+    The matcher is wider than Bash on purpose. Bash is the tool that is REDIRECTED; the
+    rest are matched so the hook can WARN that the mode does not cover them (see
+    pretool.py). Print the narrow one and a fresh install silently loses those warnings —
+    which is how this was found: one setup only had them because a human had widened it by
+    hand.
+    ⚠ Not "only Bash is ever rewritten", which this line said until the note into a spawned
+    agent's prompt made it false: an Agent call is handed back rewritten too, with the note
+    appended to the child's prompt. A comment is read far more often than a manual, so the
+    stale one was teaching the wrong thing to everyone who opened the file.
     """
     print("\nTo activate, add to ~/.claude/settings.json → hooks.PreToolUse (if not already there):")
     print(f'  {{ "matcher": "{HOOK_MATCHER}",')
