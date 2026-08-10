@@ -356,5 +356,111 @@ class TestEditHelperSizeGuard(EditCase):
             os.environ.pop("SHUNT_EDIT_MAX_BYTES", None)
 
 
+# ── what happens AROUND the write, when the edit itself succeeds ───────────────
+
+# The twin of TestWhatFailsAroundTheWriteIsSaid in tests/test_write_helper.py — the same
+# two steps, the same two silences, in the helper that edits by content. Kept in both
+# places rather than shared: these files are deployed to the far machine one at a time and
+# stand alone there, and a test that covers only one of them would let the other drift.
+#
+# Neither failure can be provoked by an argument, so it is injected where the helper runs:
+# a `sitecustomize` module on PYTHONPATH, which CPython imports at startup, breaks the one
+# os call each test is about. Everything else is the real helper, in a real subprocess.
+
+BREAK_CHOWN = """
+import os
+def _refuse(*a, **k):
+    raise PermissionError(1, "Operation not permitted")
+os.chown = _refuse
+"""
+
+BREAK_DIR_FSYNC = """
+import os, stat
+_real = os.fsync
+def _dir_fails(fd):
+    if stat.S_ISDIR(os.fstat(fd).st_mode):
+        raise OSError(5, "Input/output error")
+    return _real(fd)
+os.fsync = _dir_fails
+"""
+
+
+def run_with_broken_os(payload: dict, sabotage: str) -> dict:
+    """Drive edit_helper in a subprocess whose `os` has one call broken."""
+    d = tempfile.mkdtemp(prefix="shunt-test-sabotage-")
+    try:
+        with open(os.path.join(d, "sitecustomize.py"), "w") as f:
+            f.write(sabotage)
+        env = dict(os.environ, PYTHONPATH=d + os.pathsep + os.environ.get("PYTHONPATH", ""))
+        r = subprocess.run(
+            [PYTHON, EDIT_HELPER, base64.b64encode(json.dumps(payload).encode()).decode()],
+            capture_output=True,
+            env=env,
+        )
+        return json.loads(r.stdout.decode())
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+class TestWhatFailsAroundTheEditIsSaid(EditCase):
+    """**chown, swallowed.** The temp file belongs to whoever runs the helper, and
+    `os.replace` carries that owner onto the path — so a chown that fails changes the
+    file's OWNER while the edit lands perfectly. On `authorized_keys` or a unit file the
+    write is not the damage, the ownership is, and `except: pass` meant nobody was told.
+
+    **the directory fsync, over-reported.** It runs AFTER `os.replace`, so by the time it
+    can fail the edited content already IS the file. Reported as `write failed` it told
+    the caller the edit had not been applied when it had — the one lie this helper's
+    verify-after-write exists to make impossible.
+    """
+
+    ORIGINAL = b"listen 80;\n"
+    EDITED = b"listen 8080;\n"
+
+    def _payload(self, path):
+        return {"file": path, "old": "listen 80;", "new": "listen 8080;", "expected": 1}
+
+    def test_a_chown_that_failed_is_reported(self):
+        path = self.make(self.ORIGINAL)
+        result = run_with_broken_os(self._payload(path), BREAK_CHOWN)
+        self.assertEqual(result["status"], "ok", result)
+        said = " ".join(result.get("warnings", []))
+        self.assertIn("chown", said)
+        self.assertIn("belongs to", said)
+
+    def test_the_edit_lands_anyway(self):
+        path = self.make(self.ORIGINAL)
+        run_with_broken_os(self._payload(path), BREAK_CHOWN)
+        self.assertEqual(self.bytes_of(path), self.EDITED)
+
+    def test_a_directory_fsync_failure_is_not_a_failed_edit(self):
+        path = self.make(self.ORIGINAL)
+        result = run_with_broken_os(self._payload(path), BREAK_DIR_FSYNC)
+        self.assertEqual(result["status"], "ok", result)
+        self.assertTrue(result["verified"])
+        self.assertEqual(self.bytes_of(path), self.EDITED)
+
+    def test_the_durability_loss_is_still_said(self):
+        path = self.make(self.ORIGINAL)
+        result = run_with_broken_os(self._payload(path), BREAK_DIR_FSYNC)
+        said = " ".join(result.get("warnings", []))
+        self.assertIn("fsync", said)
+        self.assertIn("Input/output error", said)
+
+    def test_a_clean_edit_carries_no_warnings_key(self):
+        path = self.make(self.ORIGINAL)
+        result = run_via_argv(self._payload(path))
+        self.assertEqual(result["status"], "ok", result)
+        self.assertNotIn("warnings", result)
+
+    def test_a_dry_run_is_untouched_by_any_of_this(self):
+        """Nothing is written, so there is nothing around the write to fail."""
+        path = self.make(self.ORIGINAL)
+        result = run_via_argv(dict(self._payload(path), dry_run=True))
+        self.assertEqual(result["status"], "ok", result)
+        self.assertNotIn("warnings", result)
+        self.assertEqual(self.bytes_of(path), self.ORIGINAL)
+
+
 if __name__ == "__main__":
     unittest.main()

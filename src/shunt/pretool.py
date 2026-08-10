@@ -1410,7 +1410,30 @@ def _missing_field(data, tool):
     return ""
 
 
-def main():
+_TOOL_SEEN = None
+"""Which tool this call is for, as read from the harness — the one thing the roof may use.
+
+A module global and not a return value, because main() has to know it on the path where
+decide() does NOT return: the crash path. It is written the moment `tool_name` comes out of
+the input and before any logic that could fail has run, so what the roof reads is a fact
+from the harness, never a guess assembled after the failure. `None` means the crash came
+before even that — and then nothing can be told apart, which is its own answer. See main().
+"""
+
+
+def decide():
+    """What happens to this tool call — every path here ends in an exit, never a return.
+
+    Called only from main(), which is the roof over it: this function is allowed to be
+    long and to reach for the disk, because anything it fails to foresee is caught up
+    there and turned into a refusal instead of a traceback. See main().
+    """
+    global _TOOL_SEEN
+    # Cleared before anything else, so the roof can never read a name left by an earlier
+    # call. One hook invocation is one process in the field and the question would never
+    # arise there — it arises in a test suite that calls this twice, and a fact the roof
+    # acts on may not depend on which of those two worlds it is in.
+    _TOOL_SEEN = None
     try:
         data = json.load(sys.stdin)
     except Exception:
@@ -1428,6 +1451,7 @@ def main():
             "~/.claude/settings.json, from a terminal outside this session."
         )
     tool = data.get("tool_name")
+    _TOOL_SEEN = tool  # the roof's one fact — see main(); set before anything can fail
     if not isinstance(tool, str) or not tool:
         # The same blindness by a shorter road: with no tool name a bash command and a file
         # read are one shape, and only one of the two may be let through.
@@ -1711,6 +1735,89 @@ def main():
     if notice:
         warn(notice)  # exits, allowing the command — the note rides in, nothing is touched
     sys.exit(0)
+
+
+def main():
+    """The roof over decide(): a crash in this hook may not become a command running HERE.
+
+    Every refusal in this file was written for a failure someone had already met. This one
+    is written for the failures nobody has met yet, and it exists because of what the
+    harness does with an exception: a hook that raises exits non-zero-but-not-2, which is
+    a NON-BLOCKING error — the message is shown and the ORIGINAL command runs. On a routed
+    session that is `rm -rf /srv/old`, written for a server, deleting the local tree,
+    reached not by a broken input or a broken disk but by a bug of shunt's own. Two
+    fixes in this file have that exact shape (`os.makedirs` outside its guard, the atomic
+    write of the routing file), each found after the fact, each closing ONE path. This
+    closes the class: an unforeseen exception is an unknown state, and an unknown state
+    may not be answered with "run it here".
+
+    The answer is shaped the way the hook-input branches are shaped, and by the same
+    question — WHO can still repair the hook. Blocking everything on any crash would wall
+    up the one door out: `Edit` on this file needs no bash at all, and a deterministic bug
+    would otherwise cost the whole session, every session, until someone reached a terminal
+    outside it. So:
+
+      Bash                → BLOCKED (exit 2). It is the only tool that can act on the wrong
+                            machine, and whether this session is routed away is precisely
+                            what the crash leaves unknown.
+      any other tool      → ALLOWED, and TOLD, with the traceback. Read/Edit/Grep/Agent
+                            work on the LOCAL disk and cannot send anything anywhere; they
+                            are the hands that fix pretool.py from in here.
+      tool unknown        → BLOCKED. A crash before `tool_name` was even read cannot tell a
+                            bash command from a file read — the same blindness the
+                            unreadable-input branch answers, and the same answer.
+
+    That distinction is not a second decision layer; it is _TOOL_SEEN, read once, and it is
+    the same three-way shape the `missing` branch above already uses. Stepping on it rather
+    than inventing a fourth answer is the point.
+
+    THIN, and outermost, on purpose:
+      · SystemExit passes straight through, re-raised before anything else looks at it.
+        Every deliberate answer in this file leaves through emit/echo/warn/block, and all
+        four exit — a roof that swallowed them would swallow the whole hook.
+      · BaseException, not Exception: an interrupted hook is the same unknown state as a
+        crashed one, and the harness treats both the same way.
+      · the traceback rides along on BOTH answers, because "fix the hook" without the
+        failing line is an instruction with no address — and on the warn path it has to
+        travel INSIDE the message, which is the only channel a tool call at exit 0 has.
+        Imported here rather than at the top: it is stdlib, but nothing else in this file
+        needs it, and this path runs approximately never.
+      · no once-per-session budget, deliberately: the fault is happening NOW, and the
+        budget is a file in a config dir the crash may be about.
+      ⚠ Not covered, and named rather than hidden: if writing the answer itself fails, this
+        exits 1 like any other crash. Nothing is left that could say so.
+    """
+    try:
+        decide()
+    except SystemExit:
+        raise
+    except BaseException as e:
+        import traceback
+
+        detail = f"{type(e).__name__}: {e}"
+        tb = traceback.format_exc()
+        if isinstance(_TOOL_SEEN, str) and _TOOL_SEEN and _TOOL_SEEN != "Bash":
+            warn(  # exits 0 — the tool runs, and the session keeps the hands that repair this
+                f"⚠ shunt: the hook CRASHED ({detail}) while handling this {_TOOL_SEEN}. It decides "
+                "whether BASH runs here or on another machine, and it can no longer do that, so bash "
+                f"commands are REFUSED until it is fixed. {_TOOL_SEEN} was allowed on purpose: it works "
+                "on the LOCAL disk, it cannot run anything on another machine, and it is how pretool.py "
+                "gets repaired from inside this session. (repeats — a fault that is happening now is not "
+                f"kept on a budget)\n{tb}"
+            )
+        rest = (
+            "The file tools still work and are how this gets fixed from in here."
+            if isinstance(_TOOL_SEEN, str) and _TOOL_SEEN
+            else "Every tool is stopped: the crash came before the tool's name could be read, and a bash "
+            "command and a file read are the same shape until it is known."
+        )
+        block(
+            f"[shunt] hook CRASHED ({detail}) — this hook decides whether a command runs HERE or on "
+            "another machine, and it died before deciding. The call is BLOCKED and NOT run: letting it "
+            "through would run it HERE, and HERE is the wrong machine whenever the session was routed "
+            f"away. {rest} Fix pretool.py (the traceback below names the line), or take its line out of "
+            f"~/.claude/settings.json, from a terminal outside this session.\n{tb}"
+        )
 
 
 if __name__ == "__main__":

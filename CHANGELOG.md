@@ -5,6 +5,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
+## [Unreleased]
+
+One theme: **the tool answering for something it did not do.** Four places where a failure
+had no voice — a hook that died, a command re-split on the way out, a pull that ate the
+work it was asked to refresh, and two writes that reported the wrong thing about
+themselves. One entry changes behaviour you may have relied on; it is marked ⚠.
+
+### Added
+
+- **A crash in the hook now stops the command instead of releasing it.** ⚠ **Behaviour
+  change.** A hook that raises exits non-zero-but-not-2, and the harness reads that as a
+  **non-blocking** error: it prints the message and runs your **original** command. On a
+  session routed to a server that is `rm -rf /srv/old`, written for the far machine,
+  deleting the local tree — the accident this tool exists to prevent, reached through
+  shunt's own bug rather than through anything you did. Two fixes in this file's history
+  have exactly that shape (`os.makedirs` outside its guard; the routing file written
+  without an atomic rename), each closing one path after the fact.
+
+  `main()` is now a thin roof over the decision function, and it answers by the same
+  question the broken-input branch answers — who can still repair the hook:
+
+  - **Bash** → **denied**: exit **2**, the reason **and the traceback** on stderr, nothing
+    run. It is the only tool that can act on the wrong machine, and whether this session is
+    routed away is exactly what the crash leaves unknown.
+  - **every other tool** → **runs, and is told**, with the traceback inside the message.
+    `Read`/`Edit`/`Grep`/`Agent` touch only the local disk, and an `Edit` on `pretool.py`
+    is how the hook gets repaired from inside a session that has lost bash. Blocking these
+    too would wall up the one door out, every session, until someone reached a terminal
+    outside it.
+  - **a crash before `tool_name` could be read** → everything is stopped, because until
+    the tool is known a bash command and a file read are the same shape.
+
+  Deliberate answers (a rewrite, a refusal, a switch, the unreadable-input denial) leave
+  through `SystemExit` and are untouched.
+
+- **`shunt checkout` refuses to overwrite local edits.** ⚠ **Behaviour change.** A
+  re-checkout replaced the local file whole. When that file held uncommitted work, the work
+  was gone — no undo, no second copy — and the path in was the tool's own advice: `commit`
+  on a moved remote printed *"re-checkout to pick up remote changes, then re-apply your
+  edits"*. A checkout whose local file no longer matches the SHA recorded when it was
+  pulled now refuses (exit **2**) and names the three ways on:
+
+  ```
+  shunt: refusing to overwrite local edits: /home/you/.config/shunt/checkouts/web-01/etc/nginx.conf
+    this file no longer matches what was checked out, so it holds changes that exist
+    nowhere else — and a checkout replaces it whole.
+      checked-out sha: 1f0a…
+      local file sha : 9c72…
+    · keep them and push  → shunt commit /home/you/.config/shunt/checkouts/…
+    · keep them, stop tracking → shunt checkout --abandon /home/you/.config/shunt/checkouts/…
+    · DROP them, take the remote copy → shunt checkout @web-01 /etc/nginx.conf --force
+  ```
+
+  `--force` may be written anywhere on the line. A local file that is **gone**, or one
+  identical to what was pulled, is still refreshed silently — the first is how a deleted
+  checkout is repaired and must stay possible. The gate sits before anything is written
+  and before ssh is dialled. `commit`'s conflict message now points at `--force` instead of
+  at a bare re-checkout, which would walk into this refusal.
+
+### Fixed
+
+- **`shunt bg` no longer re-splits the command it was given.** It joined the remaining
+  arguments with spaces and handed the result to `bash -lc` over there, so
+  `shunt bg @web-01 rm -rf "/var/lib/My App"` arrived as `rm -rf /var/lib/My App` — two
+  paths, neither of them the one that was typed, on the hand that runs with nobody watching
+  the screen and does not come back to be corrected. It now assembles the command exactly
+  as `shunt run` does: one argument verbatim (pipes and redirects intact), several
+  re-quoted. Quoting the whole command as one argument worked before and still works. ⚠ The
+  README documented the old behaviour explicitly; that paragraph is corrected.
+- **`shunt bg @host --name LABEL` with no command left is refused.** `--name` is stripped
+  out of the command, so a line that was nothing but the flag joined to `""` and started a
+  systemd unit around an empty string: `JOB=shunt-deploy`, and nothing ran. The sibling
+  refusals (`--status` / `--stop` without a job) already answered this shape.
+- **A `chown` that fails is no longer swallowed.** The far-side helpers write to a temp
+  file and rename it into place, so the file takes the owner of whoever ran the helper
+  unless `chown` can put it back. When it could not, a bare `except: pass` meant the
+  content landed perfectly and the **ownership** was the damage — on an `authorized_keys`
+  or a unit file, that is the whole of the accident. It now comes back as a warning beside
+  `status: ok`, naming both the intended and the actual owner.
+- **A failed directory `fsync` is no longer reported as a failed write.** It runs *after*
+  the rename, so by the time it can fail the new content already **is** the file; what is
+  lost is durability, not the write. Reported as `write failed`, it made `shunt commit`
+  leave `base_sha` at the old value — and the next commit then read a remote SHA that no
+  longer matched and announced a `CONFLICT` invented by a write that had succeeded. Also a
+  warning beside `status: ok` now.
+- **`shunt commit` prints the helper's warnings.** `shunt edit` shows them for free (it
+  prints the helper's JSON verbatim); `commit` parses that JSON and dropped anything it did
+  not print — the same silence one layer up. They are warnings, not verdicts: the exit code
+  and `base_sha` still say the write landed, because it did.
+
 ## [2026081017] — 2026-08-10
 
 One theme again, one step further in: **shunt refusing to answer from something it has not

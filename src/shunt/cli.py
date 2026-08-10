@@ -20,6 +20,7 @@ shunt CLI (this file) = the special operations:
                                            (default 50) — redirected bash AND these
                                            subcommands; N counts commands, not lines
   shunt checkout @host <remote_path>       pull remote file locally so agent can Read/Edit/Write it
+              [--force]                    …and --force to overwrite local edits (refused without it)
   shunt checkout --list                    show current checkouts (local ↔ remote @host, sha)
   shunt checkout --abandon <local_path>    drop manifest entry (leave local file in place)
   shunt commit  [<local_path>]             push edited local file(s) back to remote (conflict-safe)
@@ -371,7 +372,19 @@ def cmd_bg(argv):
             die("usage: shunt bg @host <cmd> [--name LABEL]   (--name needs a label)")
         label = rest[ni + 1]
         rest = rest[:ni] + rest[ni + 2 :]
-    cmd = " ".join(rest)
+    if not rest:
+        # `--name` used to be able to eat the whole line: `shunt bg @h --name deploy` left
+        # nothing behind, ` `.join made "" out of it, and systemd-run started a unit around
+        # an empty command — a job that reports JOB=shunt-deploy and does nothing. The
+        # sibling refusals above (a flag without its argument) already answer this shape.
+        die("usage: shunt bg @host <cmd> [--name LABEL]   (no command left to run)")
+    # Assembled the way cmd_run does it, and for the same reason. ` `.join re-splits every
+    # argument that carried a space, so `shunt bg @h rm -rf "/var/lib/My App"` arrived on
+    # the far side as `rm -rf /var/lib/My App` — two paths, neither of them the one that
+    # was typed, on the hand that runs with nobody watching the screen and does not come
+    # back. One argument still passes through verbatim, so a quoted line keeps its pipes
+    # and redirects (the same split cmd_run makes, and it must stay the same split).
+    cmd = rest[0] if len(rest) == 1 else shlex.join(rest)
     if label:
         label = _re.sub(r"[^a-z0-9-]", "-", label.lower()).strip("-")
     if label:  # empty/all-illegal label → random
@@ -586,9 +599,9 @@ def _checkout_local_path(alias, remote_path):
 
 
 def cmd_checkout(argv):
-    """shunt checkout @host <remote_path> | --list | --abandon <local_path>"""
+    """shunt checkout @host <remote_path> [--force] | --list | --abandon <local_path>"""
     if not argv:
-        die("usage: shunt checkout @host <remote_path> | --list | --abandon <local_path>")
+        die("usage: shunt checkout @host <remote_path> [--force] | --list | --abandon <local_path>")
 
     if argv[0] == "--list":
         m = _manifest_load()
@@ -614,8 +627,12 @@ def cmd_checkout(argv):
         return 0
 
     # default: pull remote file
+    # `--force` is stripped before the positional arguments are counted, the way cmd_edit
+    # strips `--dry-run`, so it may be written anywhere on the line.
+    force = "--force" in argv
+    argv = [a for a in argv if a != "--force"]
     if len(argv) < 2:
-        die("usage: shunt checkout @host <remote_path>")
+        die("usage: shunt checkout @host <remote_path> [--force]")
     host = resolve_host(argv[0])  # dies if the alias is unknown
     remote_path = argv[1]
 
@@ -634,6 +651,35 @@ def cmd_checkout(argv):
     # step earlier in the same command — the pull is not the only thing that can be too
     # late to take back.
     m = _manifest_load()
+
+    # …and the second gate, in the same place and for the same reason as the first: the
+    # local file may be WORK. A re-checkout is the ordinary way to pick up remote changes,
+    # and it silently replaced whatever was sitting here — the tool telling you to do it
+    # was `commit`'s own conflict message. Everything else about a checkout is recoverable;
+    # this is not, so it is the one place that asks rather than acts (`--force` says drop
+    # them, `--abandon` says keep them and stop tracking).
+    #
+    # Three states, and only the middle one refuses:
+    #   the file is GONE          → nothing to lose, pull again (this is how a deleted
+    #                               checkout is repaired, and it must stay possible)
+    #   it differs from base_sha  → local edits, or a base_sha we cannot vouch for → REFUSE
+    #   it matches base_sha       → an untouched copy, refreshing it changes nothing
+    entry = m.get(local)
+    if entry and not force:
+        local_sha = _sha256_file(local)
+        base_sha = entry.get("base_sha")
+        if local_sha is not None and local_sha != base_sha:
+            die(
+                f"refusing to overwrite local edits: {local}\n"
+                "  this file no longer matches what was checked out, so it holds changes "
+                "that exist nowhere else — and a checkout replaces it whole.\n"
+                f"    checked-out sha: {base_sha or '(none recorded)'}\n"
+                f"    local file sha : {local_sha}\n"
+                f"  · keep them and push  → shunt commit {local}\n"
+                f"  · keep them, stop tracking → shunt checkout --abandon {local}  (the file stays as it is)\n"
+                f"  · DROP them, take the remote copy → shunt checkout {argv[0]} {remote_path} --force"
+            )
+
     os.makedirs(os.path.dirname(local), exist_ok=True)
 
     # pull via `cat` over ssh — raw-faithful (no scp binary quoting issues).
@@ -722,7 +768,13 @@ def cmd_commit(argv):
             print(f"CONFLICT {local} — remote has changed since checkout")
             print(f"  manifest base_sha : {manifest_base_sha or '(none)'}")
             print(f"  remote current_sha: {remote_sha or '(unknown)'}")
-            print("  re-checkout to pick up remote changes, then re-apply your edits.")
+            # Named exactly, because a bare "re-checkout" now walks into the guard that
+            # protects the very edits this message is about: the local file differs from
+            # base_sha (you edited it), so the plain checkout refuses. Save first, then
+            # force — in that order, and the order is the whole advice.
+            print("  copy your version aside, then:")
+            print(f"    shunt checkout @{alias} {remote_path} --force   # takes the remote copy, DROPS this one")
+            print("  and re-apply your edits to the fresh file.")
             overall_rc = 1
             continue
 
@@ -763,6 +815,14 @@ def cmd_commit(argv):
             old_short = (manifest_base_sha or "")[:12]
             new_short = new_sha[:12]
             print(f"ok  {local}  ({old_short} → {new_short})")
+            # The helper says when the content landed but something around it did not —
+            # ownership that could not follow, a rename not yet flushed. `shunt edit` shows
+            # them for free (it prints the helper's JSON verbatim); this path parses the
+            # JSON and would have dropped them on the floor, which is the same silence one
+            # layer up. Not an error: the file IS written, and calling a successful write a
+            # failure is the very bug the fsync half of this fixes.
+            for w in result.get("warnings") or []:
+                print(f"    ⚠ {w}")
         elif status == "conflict":
             print(f"CONFLICT {local} — write_helper detected conflict (remote changed mid-flight)")
             print(f"  current_sha: {result.get('current_sha')}")

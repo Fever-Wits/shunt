@@ -272,7 +272,11 @@ execution. If the active alias no longer resolves to a configured host — it wa
 renamed or deleted while the session was routed to it, or the config broke — the
 hook **runs nothing**: the command is replaced by a line saying why. There were
 three options, not two. Raising would put a traceback in front of every bash
-command; falling back to local would run the command on your own machine while
+command *for a state the hook understands perfectly well* — and worse, a hook that
+raises exits non-blocking, so the harness would then run the original line here
+(the crash umbrella in `main()` exists for the exceptions nobody foresaw, and it
+answers them by denying bash outright rather than by raising); falling back to
+local would run the command on your own machine while
 `@status` still says REMOTE, which is how a `rm -rf` meant for a server finds the
 wrong disk. Saying it out loud and executing nothing is the third — the same move
 the hook already makes for an unknown `@alias`. `shunt hosts` says what is wrong
@@ -413,7 +417,7 @@ subcommands:
 | `shunt bg @host --list / --status JOB / --stop JOB` | manage those background jobs |
 | `shunt get @host <url> [dest]` | server-side background download (`wget -b`) |
 | `shunt log [-n N]` | the last N records of the local audit log (default 50); N counts commands, not lines |
-| `shunt checkout @host <path> / --list / --abandon <local>` | pull a remote file into a local sandbox (§7) |
+| `shunt checkout @host <path> [--force] / --list / --abandon <local>` | pull a remote file into a local sandbox (§7); refuses over local edits unless `--force` |
 | `shunt commit [<local>] / --abandon <local>` | push edited files back, conflict-checked (§7) |
 | `shunt install user@host [--alias A] [--key PATH]` | register a host |
 
@@ -496,6 +500,13 @@ shared remote file:
    `fsync`s the data, preserves mode and owner, `os.replace`s it over the target
    (atomic on one filesystem), then `fsync`s the directory. Both `fsync`s matter:
    without them a crash can leave a zero-length file where the target used to be.
+   The two steps that can fail *after the content is already safe* report rather
+   than lie: a `chown` that cannot follow (the file keeps the helper's owner —
+   the content lands, the **ownership** is the damage) and a directory `fsync`
+   that fails (written and readable, not yet durable) come back as `warnings`
+   beside `status: ok`. The first used to be swallowed whole; the second used to
+   be reported as `write failed` although it runs *after* the rename, which made
+   `commit` leave `base_sha` behind and invent a `CONFLICT` on the next push.
 7. **Verify-after-write.** It re-reads the file and confirms the hash matches
    what it intended to write, reporting `verified` in the result. This is what
    catches the silently-failed write that otherwise looks like success.
@@ -505,7 +516,10 @@ shared remote file:
 Statuses: `ok`, `not_found`, `ambiguous`, `conflict`, `error`. Successful
 results include the match count, the new SHA, the `verified` flag, a unified
 diff (computed from the bytes on disk and the bytes about to be written, so it
-cannot hide a change), and whether normalization was applied.
+cannot hide a change), whether normalization was applied, and — only when there
+is one — a `warnings` list naming what failed around the write while the write
+itself stood (see item 6). `shunt edit` prints the JSON verbatim, so those show
+by themselves; `shunt commit` parses it and prints them on their own line.
 
 The helper always exits **0** — its answer is the JSON, not the code. `shunt edit`
 therefore reads the status and exits `0` only for `ok`, so `shunt edit … && deploy`
@@ -528,6 +542,19 @@ would escape that sandbox is refused. The pull lands in a `.part` file next to t
 target and is `os.replace`d into position only after ssh has succeeded: opening
 the target itself for writing would truncate it before ssh had said a word, so a
 failed **re**-checkout would destroy the very local edits it was called to refresh.
+
+A **successful** re-checkout used to destroy them too, and that is the sharper of
+the two: the local file is replaced whole, with no undo and no second copy, and
+the way in was the tool's own advice — `commit`'s conflict message said
+"re-checkout, then re-apply your edits". So the manifest read, which already sits
+before anything is written, now carries a second gate: if the local file's SHA no
+longer matches the `base_sha` recorded at checkout, the command **refuses**
+(exit 2) and names the three ways on — `shunt commit <path>`,
+`shunt checkout --abandon <path>` (keeps the file, stops tracking it), or
+`--force` to drop the edits and take the remote copy. A local file that is *gone*,
+or identical to what was pulled, is still refreshed without a word: the first is
+how a deleted checkout is repaired and has to stay possible. `commit`'s conflict
+message now points at `--force`, since a bare re-checkout would meet this refusal.
 
 `shunt commit` walks the manifest (or one named file), asks the far side for the
 file's current `sha256sum`, and refuses with `CONFLICT` if it no longer matches

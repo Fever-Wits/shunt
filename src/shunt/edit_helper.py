@@ -16,6 +16,9 @@ Input (JSON):
   {"file": str, "old": str, "new": str, "expected": 1, "base_sha": null|str, "dry_run": false}
 Output (JSON, status):
   ok        → {status, count, new_sha, verified, diff, normalized}
+              plus "warnings":[str] when the write LANDED but something around it did not —
+              a chown that could not follow (the file changed owner), a directory fsync that
+              failed (written and readable, not yet durable). Absent when there are none.
   not_found → {status, hint}                          (0 matches)
   ambiguous → {status, count, expected, hint}         (count-and-refuse)
   conflict  → {status, current_sha, base_sha}         (optimistic SHA-256 lock)
@@ -169,6 +172,7 @@ def main():
     # atomic write: temp in the SAME directory + fsync(data) + rename + fsync(dir)
     d = os.path.dirname(path) or "."
     tmp = None
+    warnings = []  # things that went wrong AFTER the content was safe — said, never fatal
     try:
         st = os.stat(path)
         fd, tmp = tempfile.mkstemp(dir=d, prefix=".shunt-edit-")
@@ -180,15 +184,19 @@ def main():
         os.chmod(tmp, st.st_mode)
         try:
             os.chown(tmp, st.st_uid, st.st_gid)
-        except Exception:
-            pass
+        except Exception as e:
+            # Swallowed, this is how a file changes hands with nobody told. The temp file
+            # belongs to whoever runs this helper, and os.replace carries THAT owner onto
+            # the path: the edit lands correctly and the OWNERSHIP is the damage — an
+            # authorized_keys or a unit file that sshd/systemd then refuses, or worse,
+            # accepts from the wrong user. The edit still stands, so this is a warning and
+            # not an error; saying it is the whole fix. Twin of the one in write_helper.py.
+            warnings.append(
+                f"chown to {st.st_uid}:{st.st_gid} failed ({getattr(e, 'strerror', None) or e}) — "
+                f"the file now belongs to {os.geteuid()}:{os.getegid()} instead"
+            )
         os.replace(tmp, path)  # atomic on the same filesystem
         tmp = None
-        dfd = os.open(d, os.O_RDONLY)
-        try:
-            os.fsync(dfd)
-        finally:
-            os.close(dfd)
     except Exception as e:
         if tmp:
             try:
@@ -196,6 +204,25 @@ def main():
             except Exception:
                 pass
         return out({"status": "error", "message": f"write failed: {e}"})
+
+    # The directory flush sits OUTSIDE the guard above, and the move is the fix: os.replace
+    # has already happened, so the edited content IS the file. What a failure here costs is
+    # DURABILITY — a machine that loses power before the kernel flushes the rename can come
+    # back with the old file — not the edit. Reported as "write failed" (where it used to
+    # live) it told the caller their edit had not been applied while it had, which is the
+    # one lie this helper's verify-after-write exists to make impossible.
+    try:
+        dfd = os.open(d, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except Exception as e:
+        warnings.append(
+            f"fsync of the directory {d} failed ({getattr(e, 'strerror', None) or e}) — the file is "
+            "written and readable now, but the rename is not flushed to disk: a crash could bring "
+            "the old file back"
+        )
 
     # verify-after-write (our niche — no SSH MCP does this)
     with open(path, "rb") as f:
@@ -212,6 +239,10 @@ def main():
     }
     if not ok:
         res["message"] = "verify mismatch after write"
+    if warnings:
+        # Present only when there IS one, so the ordinary answer keeps the exact shape
+        # every reader of it already knows.
+        res["warnings"] = warnings
     out(res)
 
 

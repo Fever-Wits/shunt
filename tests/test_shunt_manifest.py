@@ -688,6 +688,168 @@ class TestCheckoutPull(unittest.TestCase):
             self.assertEqual(disk_content, file_content_v2)
 
 
+# ── a re-checkout over local edits ─────────────────────────────────────────────
+
+
+class TestCheckoutRefusesToOverwriteLocalEdits(unittest.TestCase):
+    """The sibling of `test_failed_recheckout_keeps_the_edited_local_file`, and the case
+    that one does NOT cover: there, ssh dies and the atomic pull leaves the work alone.
+    Here everything WORKS — and a successful pull replaced the edits with the remote copy,
+    silently, with no undo and no second copy anywhere.
+
+    It was reachable by following the tool's own advice: `commit` on a file whose remote
+    had moved printed "re-checkout to pick up remote changes, then re-apply your edits" —
+    and the re-checkout destroyed the edits it was telling you to re-apply.
+
+    The gate sits where the manifest read already sits, BEFORE anything is written, and it
+    says rather than acts: three ways out, one of them `--force`. `commit`'s conflict
+    message now names that one, or the advice would walk into this refusal.
+    """
+
+    EDITED = b"my forty minutes of work\n"
+
+    def _make_hosts(self, conf):
+        with open(os.path.join(conf, "shunt.toml"), "w") as f:
+            f.write('[hosts]\nmyhost = "user@203.0.113.1"\n')
+
+    def _fake_ssh(self, called, content=b"the remote copy\n"):
+        def fake_run(cmd, **kwargs):
+            called["ssh"] = True
+            stdout = kwargs.get("stdout")
+            if stdout is not None and hasattr(stdout, "write"):
+                stdout.write(content)
+                stdout.flush()
+            m = MagicMock()
+            m.returncode = 0
+            m.stderr = b""
+            return m
+
+        return fake_run
+
+    def _checked_out(self, conf, on_disk=EDITED, base_sha=None):
+        """A checkout in the manifest, with `on_disk` sitting at the local path."""
+        self._make_hosts(conf)
+        local = os.path.realpath(shunt_mod._checkout_local_path("myhost", "/remote/file.py"))
+        os.makedirs(os.path.dirname(local), exist_ok=True)
+        if on_disk is not None:
+            with open(local, "wb") as f:
+                f.write(on_disk)
+        shunt_mod._manifest_save(
+            {
+                local: {
+                    "host": "myhost",
+                    "remote": "/remote/file.py",
+                    "base_sha": base_sha or sha256(b"what was pulled the first time\n"),
+                }
+            }
+        )
+        return local
+
+    def _checkout(self, argv):
+        called = {"ssh": False}
+        with (
+            patch("subprocess.run", side_effect=self._fake_ssh(called)),
+            patch("sys.stderr", new_callable=io.StringIO) as err,
+            patch("sys.stdout", new_callable=io.StringIO) as out,
+        ):
+            try:
+                code = shunt_mod.cmd_checkout(argv)
+            except SystemExit as e:
+                code = e.code
+        return code, err.getvalue(), out.getvalue(), called["ssh"]
+
+    def test_it_refuses(self):
+        with TmpConf() as conf:
+            self._checked_out(conf)
+            code, err, _, _ = self._checkout(["@myhost", "/remote/file.py"])
+            self.assertNotEqual(code, 0)
+            self.assertIn("refusing to overwrite local edits", err)
+
+    def test_the_file_is_untouched(self):
+        """The whole point. Not "restored afterwards" — never written at all."""
+        with TmpConf() as conf:
+            local = self._checked_out(conf)
+            self._checkout(["@myhost", "/remote/file.py"])
+            with open(local, "rb") as f:
+                self.assertEqual(f.read(), self.EDITED)
+            self.assertFalse(os.path.exists(local + ".part"))
+
+    def test_it_refuses_before_touching_the_network(self):
+        """A gate placed after the pull is not a gate — the same lesson the manifest read
+        learned one step earlier in this command."""
+        with TmpConf() as conf:
+            self._checked_out(conf)
+            _, _, _, ssh_called = self._checkout(["@myhost", "/remote/file.py"])
+            self.assertFalse(ssh_called)
+
+    def test_the_manifest_is_left_alone(self):
+        with TmpConf() as conf:
+            local = self._checked_out(conf, base_sha="the_first_pull")
+            self._checkout(["@myhost", "/remote/file.py"])
+            self.assertEqual(shunt_mod._manifest_load()[local]["base_sha"], "the_first_pull")
+
+    def test_it_names_every_way_out(self):
+        """A refusal with no door is a wall. Keep and push · keep and stop tracking · drop."""
+        with TmpConf() as conf:
+            self._checked_out(conf)
+            _, err, _, _ = self._checkout(["@myhost", "/remote/file.py"])
+            self.assertIn("shunt commit", err)
+            self.assertIn("--abandon", err)
+            self.assertIn("--force", err)
+
+    def test_it_shows_both_shas(self):
+        """Saying they differ without the numbers sends the reader back to compute them."""
+        with TmpConf() as conf:
+            local = self._checked_out(conf, base_sha="the_first_pull")
+            _, err, _, _ = self._checkout(["@myhost", "/remote/file.py"])
+            self.assertIn("the_first_pull", err)
+            self.assertIn(sha256(self.EDITED), err)
+            self.assertIn(local, err)
+
+    # ── and the three shapes that must NOT be refused ─────────────────────────
+
+    def test_force_takes_the_remote_copy(self):
+        with TmpConf() as conf:
+            local = self._checked_out(conf)
+            code, _, _, ssh_called = self._checkout(["@myhost", "/remote/file.py", "--force"])
+            self.assertEqual(code, 0)
+            self.assertTrue(ssh_called)
+            with open(local, "rb") as f:
+                self.assertEqual(f.read(), b"the remote copy\n")
+            self.assertEqual(shunt_mod._manifest_load()[local]["base_sha"], sha256(b"the remote copy\n"))
+
+    def test_an_untouched_checkout_still_refreshes(self):
+        """Nothing is lost by replacing a copy identical to what was pulled — refusing
+        here would break the ordinary "get the latest" without protecting anything."""
+        with TmpConf() as conf:
+            untouched = b"exactly what was pulled\n"
+            local = self._checked_out(conf, on_disk=untouched, base_sha=sha256(untouched))
+            code, _, _, ssh_called = self._checkout(["@myhost", "/remote/file.py"])
+            self.assertEqual(code, 0)
+            self.assertTrue(ssh_called)
+            with open(local, "rb") as f:
+                self.assertEqual(f.read(), b"the remote copy\n")
+
+    def test_a_local_file_that_is_gone_is_pulled_again(self):
+        """A deleted checkout is repaired by re-running the command that made it. There
+        are no edits to lose in an absent file, and refusing would leave the manifest
+        entry with no way to make good on it."""
+        with TmpConf() as conf:
+            local = self._checked_out(conf, on_disk=None)
+            code, _, _, ssh_called = self._checkout(["@myhost", "/remote/file.py"])
+            self.assertEqual(code, 0)
+            self.assertTrue(ssh_called)
+            self.assertTrue(os.path.exists(local))
+
+    def test_a_file_that_was_never_checked_out_is_pulled(self):
+        """No manifest entry, no base_sha, nothing to compare — a first checkout."""
+        with TmpConf() as conf:
+            self._make_hosts(conf)
+            code, _, _, ssh_called = self._checkout(["@myhost", "/remote/file.py"])
+            self.assertEqual(code, 0)
+            self.assertTrue(ssh_called)
+
+
 # ── cmd_commit --abandon ───────────────────────────────────────────────────────
 
 
@@ -1000,3 +1162,56 @@ class TestCommitPush(unittest.TestCase):
 
             self.assertNotEqual(rc, 0)
             self.assertIn("SKIP", mock_out.getvalue())
+
+    def _commit_with_helper_warnings(self, warnings):
+        """A successful push whose helper reported something around the write."""
+        local_content = b"edited content\n"
+        response = json.dumps(
+            {"status": "ok", "new_sha": sha256(local_content), "verified": True, "warnings": warnings}
+        ).encode()
+        call_count = {"n": 0}
+
+        def fake_run(cmd, **kwargs):
+            m = MagicMock()
+            call_count["n"] += 1
+            m.returncode = 0
+            m.stderr = b""
+            m.stdout = (sha256(local_content) + "  /remote/file.py\n").encode() if call_count["n"] == 1 else response
+            return m
+
+        with TmpConf() as conf:
+            local, _ = self._setup_conf(conf, local_content)
+            with (
+                patch("subprocess.run", side_effect=fake_run),
+                patch("sys.stdout", new_callable=io.StringIO) as mock_out,
+            ):
+                rc = shunt_mod.cmd_commit([])
+            return rc, mock_out.getvalue(), shunt_mod._manifest_load()[local]["base_sha"]
+
+    def test_a_helper_warning_reaches_the_caller(self):
+        """`shunt edit` prints the helper's JSON verbatim, so its warnings show for free.
+        This path PARSES the JSON, and anything it does not print is dropped on the floor —
+        the same silence the helper was just taught not to keep, one layer up. The case is
+        real: a chown that could not follow means the file changed OWNER, which is the
+        whole of the damage on an authorized_keys.
+        """
+        _, out, _ = self._commit_with_helper_warnings(
+            ["chown to 0:0 failed (Operation not permitted) — the file now belongs to 1000:1000 instead"]
+        )
+        self.assertIn("chown", out)
+        self.assertIn("belongs to", out)
+
+    def test_the_write_still_counts_as_done(self):
+        """It is a warning, not a verdict. Turning a landed write into a non-zero exit is
+        the very bug the fsync half of this fixed, pointing the other way — and base_sha
+        must move, or the next commit invents a conflict."""
+        local_content = b"edited content\n"
+        rc, out, base_sha = self._commit_with_helper_warnings(["fsync of the directory /etc failed (I/O error)"])
+        self.assertEqual(rc, 0)
+        self.assertIn("ok", out)
+        self.assertEqual(base_sha, sha256(local_content))
+
+    def test_a_clean_push_prints_no_warning_line(self):
+        rc, out, _ = self._commit_with_helper_warnings([])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("⚠", out)

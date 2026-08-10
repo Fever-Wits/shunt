@@ -376,5 +376,102 @@ class TestUntouchedShapes(unittest.TestCase):
         self.assertIn("JOB=shunt-", script)
 
 
+# ── the fifth silence: the argv that was typed is not the argv that arrived ────
+
+
+def run_far_side_with_stubs(script, stub_bodies):
+    """Run the generated remote script under a shell whose named commands are stubs.
+
+    The question here is not "what string did shunt build" but "what argv does the FAR
+    machine end up with", and only a shell can answer that — so the script is executed,
+    the way the --stop and --list tests above already execute theirs.
+
+    Two named departures, both harmless to the question:
+      · the `systemd-run` stub runs the `bash -lc CMD` it was handed as `bash -c CMD`.
+        A login shell would re-read /etc/profile and rewrite PATH out from under the
+        stubs; login files change nothing about word splitting, which is the whole of
+        what is being asked.
+      · the stubs report on STDERR, because the real script sends systemd-run's stdout
+        to /dev/null.
+    """
+    binn = tempfile.mkdtemp(prefix="shunt-test-bg-argv-")
+    try:
+        for name, body in stub_bodies.items():
+            p = os.path.join(binn, name)
+            with open(p, "w") as f:
+                f.write("#!/bin/sh\n" + body)
+            os.chmod(p, 0o755)
+        return subprocess.run(
+            ["bash", "-c", script],
+            env={"PATH": binn + os.pathsep + os.environ.get("PATH", ""), "HOME": binn},
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        shutil.rmtree(binn, ignore_errors=True)
+
+
+# `systemd-run --collect --remain-after-exit --unit=X bash -lc CMD` → run CMD
+SYSTEMD_RUN_STUB = 'exec "$4" -c "$6"\n'
+# every argument the far shell handed us, one per line, unambiguously bracketed
+ECHO_ARGV_STUB = 'for a in "$@"; do echo "ARG:[$a]" >&2; done\n'
+
+
+class TestTheArgvSurvivesTheTrip(unittest.TestCase):
+    """`bg` assembled its command with ` `.join(rest), so every argument that carried a
+    space was RE-SPLIT on the far side: `shunt bg @h1 rm -rf "/var/lib/My App"` arrived as
+    `rm -rf /var/lib/My App` — two paths, neither of them the one that was typed. The
+    sibling hand had it right all along: `cmd_run` re-quotes with shlex.join and passes a
+    single argument through verbatim, and this is now the same split.
+
+    The hand matters as much as the bug: `bg` starts long work with nobody watching the
+    screen, and it does not come back to be corrected.
+    """
+
+    PATH_WITH_A_SPACE = "/var/lib/My App"
+
+    def _argv_on_the_far_side(self, argv):
+        with TmpHosts():
+            script, _ = bg_with_stubbed_ssh(argv)
+        r = run_far_side_with_stubs(script, {"systemd-run": SYSTEMD_RUN_STUB, "rm": ECHO_ARGV_STUB})
+        return [ln[len("ARG:") :] for ln in r.stderr.splitlines() if ln.startswith("ARG:")]
+
+    def test_a_path_with_a_space_arrives_as_ONE_argument(self):
+        args = self._argv_on_the_far_side(["@h1", "rm", "-rf", self.PATH_WITH_A_SPACE])
+        self.assertIn(f"[{self.PATH_WITH_A_SPACE}]", args)
+
+    def test_it_does_not_arrive_as_two_paths(self):
+        """The half that names the damage: the old split deleted `/var/lib/My` and `App`."""
+        args = self._argv_on_the_far_side(["@h1", "rm", "-rf", self.PATH_WITH_A_SPACE])
+        self.assertNotIn("[/var/lib/My]", args)
+        self.assertNotIn("[App]", args)
+
+    def test_the_flags_are_still_flags(self):
+        """Re-quoting must not quote what needed no quoting — `-rf` stays an option."""
+        args = self._argv_on_the_far_side(["@h1", "rm", "-rf", self.PATH_WITH_A_SPACE])
+        self.assertEqual(args, ["[-rf]", f"[{self.PATH_WITH_A_SPACE}]"])
+
+    def test_one_quoted_argument_still_passes_through_verbatim(self):
+        """The other half of cmd_run's split, and the reason it is not shlex.join always:
+        `shunt bg @h1 "rm -rf /tmp/x | tee log"` is ONE argument and keeps its pipe."""
+        with TmpHosts():
+            script, _ = bg_with_stubbed_ssh(["@h1", "ls /etc | wc -l"])
+        self.assertIn("ls /etc | wc -l", script)
+
+    def test_a_name_that_eats_the_whole_line_is_refused(self):
+        """`--name` is stripped out of the command, so `bg @h1 --name deploy` left nothing
+        behind — and ` `.join made "" out of nothing, starting a systemd unit around an
+        empty command that reported JOB=shunt-deploy and did nothing."""
+        with TmpHosts():
+            with patch.object(sys, "stderr", io.StringIO()) as err:
+                with self.assertRaises(SystemExit):
+                    # ssh stubbed on purpose, and the reason is the defect itself: without
+                    # the refusal this line does not stop — it goes on to OPEN A CONNECTION
+                    # and start the empty job. A test for a missing guard has to survive
+                    # the code that is missing it.
+                    bg_with_stubbed_ssh(["@h1", "--name", "deploy"])
+            self.assertIn("no command", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

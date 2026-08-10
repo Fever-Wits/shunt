@@ -586,3 +586,140 @@ class TestWriteHelperBadInput(unittest.TestCase):
         )
         self.assertEqual(result["status"], "error")
         self.assertFalse(os.path.exists(path))
+
+
+# ── what happens AROUND the write, when the write itself succeeds ──────────────
+
+# The two steps that used to answer for themselves. `chown` was wrapped in a bare
+# `except: pass`; the directory `fsync` sat inside the guard that reports "write failed".
+# Neither can be provoked by an argument, so the failure is injected where the helper
+# actually runs: a `sitecustomize` module on PYTHONPATH, which CPython imports at startup,
+# breaks the one os call each test is about. Everything else is the real helper, in a real
+# subprocess, writing a real file — which is what makes "the write still landed" provable
+# rather than argued.
+
+BREAK_CHOWN = """
+import os
+def _refuse(*a, **k):
+    raise PermissionError(1, "Operation not permitted")
+os.chown = _refuse
+"""
+
+# Only the DIRECTORY flush fails. The data fsync on the temp file must keep working, or
+# the test would be about a different step.
+BREAK_DIR_FSYNC = """
+import os, stat
+_real = os.fsync
+def _dir_fails(fd):
+    if stat.S_ISDIR(os.fstat(fd).st_mode):
+        raise OSError(5, "Input/output error")
+    return _real(fd)
+os.fsync = _dir_fails
+"""
+
+
+def run_with_broken_os(payload: dict, sabotage: str) -> dict:
+    """Drive write_helper in a subprocess whose `os` has one call broken."""
+    import shutil
+
+    d = tempfile.mkdtemp(prefix="shunt-test-sabotage-")
+    try:
+        with open(os.path.join(d, "sitecustomize.py"), "w") as f:
+            f.write(sabotage)
+        env = dict(os.environ, PYTHONPATH=d + os.pathsep + os.environ.get("PYTHONPATH", ""))
+        r = subprocess.run(
+            [PYTHON, WRITE_HELPER, base64.b64encode(json.dumps(payload).encode()).decode()],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        return json.loads(r.stdout.strip())
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+class TestWhatFailsAroundTheWriteIsSaid(unittest.TestCase):
+    """Two silences, opposite in shape, one rule between them: say what happened.
+
+    **chown, swallowed.** The temp file belongs to whoever runs the helper, and `os.replace`
+    carries that owner onto the path — so a chown that fails changes the file's OWNER while
+    the content lands perfectly. On `authorized_keys`, a unit file, a key: the write is not
+    the damage, the ownership is, and `except: pass` meant nobody was told.
+
+    **the directory fsync, over-reported.** It runs AFTER `os.replace`, so by the time it
+    can fail the new content already IS the file. Reported as `write failed` it told the
+    caller their write had not happened when it had — and `shunt commit` then left
+    `base_sha` at the old value, so the NEXT commit read a remote sha that no longer
+    matched: a CONFLICT invented by a write that succeeded.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="shunt-test-write-around-")
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _existing(self, content=b"the old content\n"):
+        path = os.path.join(self.tmpdir, "target.conf")
+        with open(path, "wb") as f:
+            f.write(content)
+        return path, sha256(content)
+
+    def _payload(self, path, base_sha, new=b"the new content\n"):
+        return {"file": path, "content_b64": b64(new), "base_sha": base_sha}
+
+    # ── chown ────────────────────────────────────────────────────────────────
+
+    def test_a_chown_that_failed_is_reported(self):
+        path, base = self._existing()
+        result = run_with_broken_os(self._payload(path, base), BREAK_CHOWN)
+        self.assertEqual(result["status"], "ok", result)
+        self.assertTrue(any("chown" in w for w in result.get("warnings", [])), result)
+
+    def test_the_chown_warning_says_the_file_changed_hands(self):
+        """A bare "chown failed" leaves the reader to work out the consequence."""
+        path, base = self._existing()
+        result = run_with_broken_os(self._payload(path, base), BREAK_CHOWN)
+        said = " ".join(result.get("warnings", []))
+        self.assertIn("belongs to", said)
+        self.assertIn("Operation not permitted", said)
+
+    def test_the_content_is_written_anyway(self):
+        """The warning must not be mistaken for a refusal: ownership is the casualty,
+        not the write."""
+        path, base = self._existing()
+        run_with_broken_os(self._payload(path, base), BREAK_CHOWN)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"the new content\n")
+
+    # ── the directory fsync ──────────────────────────────────────────────────
+
+    def test_a_directory_fsync_failure_is_not_a_failed_write(self):
+        path, base = self._existing()
+        result = run_with_broken_os(self._payload(path, base), BREAK_DIR_FSYNC)
+        self.assertEqual(result["status"], "ok", result)
+        self.assertEqual(result["new_sha"], sha256(b"the new content\n"))
+
+    def test_and_the_file_on_disk_proves_it(self):
+        path, base = self._existing()
+        run_with_broken_os(self._payload(path, base), BREAK_DIR_FSYNC)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"the new content\n")
+
+    def test_it_is_still_said_out_loud(self):
+        """Not an error, and not silence either — durability is a real thing to lose."""
+        path, base = self._existing()
+        result = run_with_broken_os(self._payload(path, base), BREAK_DIR_FSYNC)
+        said = " ".join(result.get("warnings", []))
+        self.assertIn("fsync", said)
+        self.assertIn("Input/output error", said)
+
+    # ── and the ordinary answer keeps its shape ──────────────────────────────
+
+    def test_a_clean_write_carries_no_warnings_key(self):
+        path, base = self._existing()
+        result = run_via_argv(self._payload(path, base))
+        self.assertEqual(result["status"], "ok", result)
+        self.assertNotIn("warnings", result)

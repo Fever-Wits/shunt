@@ -71,12 +71,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the details.
 suspicion; each one exists because a specific silence cost somebody a specific thing, and
 the cheapest fix was a sentence.
 
-⚠ **Know what "refuses" means here.** With one exception named below, the hook does not
+⚠ **Know what "refuses" means here.** With the two exceptions named below, the hook does not
 deny the tool call. It replaces your command with an `echo` of the reason, so **the call
 succeeds — exit 0, the reason on stdout** — and nothing runs on either machine. It is built that way on purpose: the hook
-must never raise (a traceback in front of every bash command is worse than anything it
+should never raise (a traceback in front of every bash command is worse than anything it
 would report), and a refusal that ran the command locally would be the very accident these
-guards exist to prevent. The **whole line** is replaced, chain and all: nothing in
+guards exist to prevent. If it raises **anyway**, that is the second exception — the call
+is denied rather than let through, because the harness would otherwise run your original
+command; see *A crash in the hook stops the command* below. The **whole line** is replaced, chain and all: nothing in
 `make deploy && ./verify` runs, not even `./verify`. The cost is the code — a refusal
 reports **0**, so anything reading only that number (a `&&` in your *next* command, a
 `set -e` script, an agent's next step) takes it for success. Read the output, not just the
@@ -96,6 +98,9 @@ exit code.
 | **`exit 255` is named** | ssh's own failures exit **255**, and bare it reads as a verdict from whatever you thought you were running. One line on stderr says the transport failed and the command almost certainly never left — and the exit code is handed on untouched, 255 included. On every other code this guard adds nothing at all. |
 | **The remembered directory speaks when it is gone** | The far side restores your session's directory before every command. If it cannot be entered — swept, unmounted, permissions changed — the command still runs, in `$HOME`, and a line on stderr says so by name — with both paths as the far shell expands them: `shunt: /srv/release cannot be entered (gone or not accessible); running in /home/deploy instead`. Silence here is how `rm -rf ./*` meant for a release directory happens in a home directory instead. It says CANNOT BE ENTERED rather than "is gone", because a wrong cause sends you looking in the wrong place. Once per switch it also *probes* the write, so a `$HOME` that cannot be written to is reported instead of costing you every `cd` from then on. |
 | **A job systemd never heard of is not a finished job** | `systemctl show` invents an answer for a unit it does not know: every property comes back at its default — `Result=success`, `SubState=dead`, `ExecMainStatus=0` — at exit 0. So `shunt bg @web-01 --status shunt-typo` read exactly like a job that had completed cleanly, in the one hand here that runs with nobody watching the screen. `bg --status` now asks `LoadState` as a question: the properties are still printed — contradicted, not hidden — and a unit that is not there comes back **non-zero** with `shunt: no such job … the status above is systemd answering about NOTHING`. A host that cannot answer at all (no systemd, no permission) says *that* instead, rather than passing for "no such job". |
+| **A crash in the hook stops the command** | The second place in this table where a call is **denied** — exit **2**, the reason *and the traceback* on stderr — and the only one that fires for a bug of shunt's own. A hook that raises exits non-zero-but-not-2, which the harness reads as a **non-blocking** error: it shows the message and runs your **original** command. On a routed session that is `rm -rf /srv/old`, written for a server, deleting the local tree — the accident this whole tool exists to prevent, arriving through shunt's own traceback. An unforeseen exception is now treated as the unknown state it is, and answered by the same question as the row above: **bash is denied**, while **every other tool runs and is told**, traceback included — they touch only the local disk, and an `Edit` on `pretool.py` is what repairs the hook from inside a session that has lost bash. Only a crash landing *before* `tool_name` could be read stops everything, because until then a bash command and a file read are the same shape. Deliberate refusals are untouched — they leave through a different door and always did. |
+| **A re-checkout does not eat local edits** | `shunt checkout` over a file whose contents no longer match the SHA recorded when it was pulled **refuses** (exit 2) instead of replacing it. The path in was the tool's own advice: `commit` on a moved remote said "re-checkout, then re-apply your edits", and the re-checkout destroyed the edits it was telling you to re-apply — silently, with no undo and no second copy. The refusal names all three ways on (`commit` · `--abandon` · `--force`), and `commit`'s conflict message now names `--force` too. A file that is **gone**, or identical to what was pulled, is still refreshed without a word. |
+| **A write that half-worked says so** | The far-side helpers used to answer for two steps they could not vouch for. A `chown` that failed was swallowed whole — the file kept the owner of whoever ran the helper, so the content landed perfectly and the **ownership** was the damage (an `authorized_keys`, a unit file). A directory `fsync` that failed was reported as `write failed` although it runs *after* the rename, so the write had in fact landed — and `commit` then left `base_sha` behind, inventing a `CONFLICT` on the next push. Both now come back as `warnings` beside a `status: ok`, printed by `shunt commit` and already visible in `shunt edit`'s output. |
 | **Some bad arguments are refused rather than guessed** | Where a wrong argument used to produce a plausible-looking *answer*, it now refuses with exit **2**: `shunt log -n 5OO` (a letter O) printed the default 50 records, which look exactly like the whole truth; `shunt bg … --name` with no label handed `--name` to the far side as part of your command; `bg --status` / `--stop` with no job did the same. This is a list, not a rule — other malformed arguments still fail with a traceback. |
 
 ### For a spawned agent
@@ -380,10 +385,14 @@ $ shunt bg @web-01 "make -j8 all" --name nightly-build
 JOB=shunt-nightly-build
 ```
 
-⚠ **Quoting is not the same as `shunt run`.** The remaining words are joined with spaces
-and handed to `bash -lc` over there — they are **not** re-quoted, so
-`shunt bg @web-01 echo "a b"` arrives as `echo a b`. Quote the whole command as one
-argument, the way the example does.
+**Quoting is the same as `shunt run`.** One argument is passed through verbatim, so a
+quoted command keeps its pipes and redirects; several arguments are re-quoted, so a word
+that carried a space stays one word. Until 2026-08-10 the words were joined with spaces
+and **not** re-quoted, so `shunt bg @web-01 rm -rf "/var/lib/My App"` arrived over there
+as two paths — see the CHANGELOG. Quoting the whole command as one argument, the way the
+example does, worked before and works now. `--name` no longer eats the whole line either:
+`shunt bg @host --name deploy` with no command left is refused instead of starting a
+systemd unit around an empty string.
 
 - `--name LABEL` — human-readable unit name, sanitized to `shunt-<label>`: lower-cased,
   every character outside `a-z0-9-` replaced by `-`, leading and trailing `-` dropped.
@@ -457,6 +466,12 @@ shunt commit                                  # pushes all pending checkouts bac
 - A **failed** checkout leaves the local file alone. The pull is written beside it and
   moved into place only once it has fully arrived, so checking a file out again over an
   unreachable host cannot destroy the edits you have not committed yet.
+- A **successful** one leaves it alone too, now, when it holds work: if the local file no
+  longer matches the SHA recorded at checkout, `checkout` **refuses** (exit 2) and names
+  the three ways on — `shunt commit <path>` to push the edits, `shunt checkout --abandon
+  <path>` to keep the file and stop tracking it, or `--force` to drop them and take the
+  remote copy. Add `--force` anywhere on the line. `commit`'s conflict message points at
+  that flag, because a bare re-checkout now walks into this refusal.
 
 A bare `shunt commit` pushes **every** pending checkout and is per-entry, not
 all-or-nothing: a conflict, an unreadable local file, or an entry whose host is no longer
