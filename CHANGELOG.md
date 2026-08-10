@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
-## [Unreleased]
+## [2026081019] — 2026-08-10
 
 One theme: **the tool answering for something it did not do.** Places where a failure had
 no voice — a hook that died, a command re-split on the way out, a pull that ate the work it
