@@ -747,6 +747,45 @@ COMMAND_BREAK = re.compile(r"[\n;&|(){}`]+|\$\(|\s-exec(?:dir)?\s")
 NOT_THE_COMMAND = ("sudo", "doas", "env", "time", "nohup", "xargs", "command", "then", "else", "do")
 ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z_0-9]*=")
 
+# Short options that leave their VALUE in the next word. Stepping over the flag is not
+# enough when the value is a bare word: `sudo -u www rm -rf /srv` stepped over `sudo` and
+# over `-u`, then took `www` for the command and said nothing about the rm behind it.
+#
+# The list is per-prefix and bounded, out of each tool's own man page, by ONE criterion: an
+# option whose value CANNOT itself be a command. That is what keeps the fix from becoming
+# the defect — a word skipped here is a word never examined, so a letter wrongly in this
+# table HIDES a warning, which is the one direction this whole check may not fail in.
+# By that criterion:
+#   · `env` stays out entirely, though it is a prefix too: `env -S 'rm -rf /x'` hands a
+#     COMMAND as the value, and skipping it would lose exactly what we are looking for.
+#     Today it finds the rm through the quote; that stays.
+#   · sudo's `-h` stays out: it is `--help` with no value AND `--host=host` with one, and
+#     which it is depends on what follows. `sudo -h rm …` finds the rm today; a warner may
+#     not trade that away to guess. The price is named: `sudo -h somehost rm …` keeps
+#     missing it, exactly as it does now.
+# `--user=www` and `-uwww` carry the value inside the word and never needed this.
+TAKES_A_VALUE = {
+    "sudo": set("CDgpRrtTUu"),
+    "doas": set("Cu"),
+}
+
+
+def _wants_the_next_word(option, eaters):
+    """Does this option leave its value in the NEXT word?
+
+    Short options bundle (`-nu www`), and getopt's rule is that a value-taking letter
+    swallows the rest of its OWN cluster — so only a cluster ENDING in such a letter
+    reaches over. A long option carries its value after `=` or has none.
+    """
+    if option.startswith("--"):
+        return False
+    letters = option[1:]
+    for i, letter in enumerate(letters):
+        if letter in eaters:
+            return i == len(letters) - 1
+    return False
+
+
 # A lone `>` truncates whatever it points at. `>>` appends, `2>&1` and `>&2` only move a
 # stream, and `->` inside a word (`--pretty=%h -> %s`) is not a redirect at all.
 # `/dev/null` is a lone `>` and is excluded anyway: there is nothing there to lose. Not
@@ -755,6 +794,46 @@ ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z_0-9]*=")
 # ordinary commands. That is the wallpaper the two-narrow-cases rule above IRREVERSIBLE
 # exists to prevent. The word boundary keeps `> /dev/nullish` — somebody's real file —
 # on the loud side.
+#
+# ⚠ It reads the RAW text, so `echo "a > b"` and `grep "x>y"` warn about a `>` that only
+# LOOKS like a redirect. Examined 2026-08-10 and left as it is — a decision, not a gap.
+# The clean fix is to blank out the quoted regions before this scan (a small state machine,
+# cheap, and confined to this one line — the command scan below must keep reading the raw
+# text, where a phantom segment can only ADD a warning). It was refused on what it would
+# cost: quoted text is not always inert. `ssh host "cd /x && rm -rf y > log"`, `bash -c`,
+# `su -c` hand the quoted region to another interpreter, where the `>` truncates a real
+# file — and blanking it out turns today's noise into SILENCE on the shape this tool exists
+# to run. Telling those apart needs a list of every command that takes code as a string,
+# which is the parser weight this check is built to avoid, and the list is wrong the day
+# someone adds the next one. Between a `>` announced that was only text, and a `>` that
+# truncates a file on another machine passing unmentioned, this check keeps the noise.
+# (Pinned by tests — see test_pretool_warnings.TestTheFalseAlarmThatStays.)
+OVERWRITE = re.compile(r"(?<![->])>(?![>&])(?!\s*/dev/null\b)")
+OVERWRITE_NAME = "> (truncates its target)"
+
+
+# A lone `>` truncates whatever it points at. `>>` appends, `2>&1` and `>&2` only move a
+# stream, and `->` inside a word (`--pretty=%h -> %s`) is not a redirect at all.
+# `/dev/null` is a lone `>` and is excluded anyway: there is nothing there to lose. Not
+# politeness — `2>/dev/null` is the commonest shape in an agent's bash, our own remote
+# script carries one, and without this the loudest line the hook has rode along with
+# ordinary commands. That is the wallpaper the two-narrow-cases rule above IRREVERSIBLE
+# exists to prevent. The word boundary keeps `> /dev/nullish` — somebody's real file —
+# on the loud side.
+#
+# ⚠ It reads the RAW text, so `echo "a > b"` and `grep "x>y"` warn about a `>` that only
+# LOOKS like a redirect. Examined 2026-08-10 and left as it is — a decision, not a gap.
+# The clean fix is to blank out the quoted regions before this scan (a small state machine,
+# cheap, and confined to this one line — the command scan below must keep reading the raw
+# text, where a phantom segment can only ADD a warning). It was refused on what it would
+# cost: quoted text is not always inert. `ssh host "cd /x && rm -rf y > log"`, `bash -c`,
+# `su -c` hand the quoted region to another interpreter, where the `>` truncates a real
+# file — and blanking it out turns today's noise into SILENCE on the shape this tool exists
+# to run. Telling those apart needs a list of every command that takes code as a string,
+# which is the parser weight this check is built to avoid, and the list is wrong the day
+# someone adds the next one. Between a `>` announced that was only text, and a `>` that
+# truncates a file on another machine passing unmentioned, this check keeps the noise.
+# (Pinned by tests — see test_pretool_warnings.TestTheFalseAlarmThatStays.)
 OVERWRITE = re.compile(r"(?<![->])>(?![>&])(?!\s*/dev/null\b)")
 OVERWRITE_NAME = "> (truncates its target)"
 
@@ -764,9 +843,24 @@ def _command_of(words):
 
     A leading `sudo`, a shell keyword, an option or a VAR=value is stepped over, and a
     path is reduced to its last part, so /bin/rm is still rm.
+
+    An option that keeps its value in the next word takes that word with it (TAKES_A_VALUE)
+    — but only once the prefix that OWNS those letters has been seen. `-u` means nothing to
+    `rm` itself, and stepping over a word on nobody's behalf could step over the command.
     """
+    eaters = set()
+    skip_value = False
     for word in words:
-        if word in NOT_THE_COMMAND or word.startswith("-") or ASSIGNMENT.match(word):
+        if skip_value:
+            skip_value = False
+            continue
+        if word in NOT_THE_COMMAND:
+            eaters |= TAKES_A_VALUE.get(word, set())
+            continue
+        if word.startswith("-"):
+            skip_value = _wants_the_next_word(word, eaters)
+            continue
+        if ASSIGNMENT.match(word):
             continue
         return os.path.basename(word).strip("'\"")
     return ""
@@ -1206,6 +1300,14 @@ def ssh_opts(host, sid):
     it is a LOCAL file, it is meant to die with the machine, and a unix socket path has
     ~104 characters to live in. The cwd state-file is the FAR side's and lives in that
     side's home — see REMOTE_STATE_DIR. The two are not twins.
+
+    ⚠ …and the CLI's socket LEFT /tmp (cli.py control_path), which makes this an asymmetry
+    worth naming rather than a copy that fell behind. What buys the exemption is the `sid`
+    below: this name cannot be guessed from outside, so a world-writable directory hands
+    nobody a path to sit on first. The CLI's name has no such part — it must stay
+    predictable to be REUSED between separate calls — so its place had to become private
+    instead. The sandbox is the second reason: the rewritten command may not share a
+    private directory of ours, while /tmp it always has.
 
     The THIRD copy of this knowledge is the CLI's own ssh_opts (cli.py). It cannot be
     imported — the rewritten command runs in a sandbox that has no files of ours — so the

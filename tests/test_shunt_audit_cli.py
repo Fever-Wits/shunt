@@ -103,11 +103,29 @@ class TestEachSubcommandIsRecorded(unittest.TestCase):
             line = c.lines()[0]
             self.assertIn("[cp] ./local.txt -> @h1:/tmp/there.txt", line)
 
-    def test_bg_start_is_recorded(self):
+    def test_bg_start_is_recorded_with_the_boundaries_kept(self):
+        """The quotes ARE the record: `make -j8 all` arrived as ONE argument, and the log
+        now says so. It used to be assembled with ` `.join, which re-split every argument
+        that carried a space — so `shunt bg @h "rm -rf /var/lib/My App"` was logged as two
+        paths, neither of them the one that was typed, on the hand that runs with nobody
+        watching. The command itself has always been assembled with shlex.join; the witness
+        now quotes the way the executor quotes."""
         with TmpConf() as c:
             with stub_ssh():
                 shunt_mod.cmd_bg(["@h1", "make -j8 all", "--name", "nightly"])
-            self.assertIn("[bg] make -j8 all --name nightly", c.lines()[0])
+            self.assertIn("[bg] 'make -j8 all' --name nightly", c.lines()[0])
+
+    def test_a_bg_line_reads_back_as_what_was_typed(self):
+        """The property, not the spelling: shlex.split undoes shlex.join, so the log can be
+        turned back into the argv it recorded. ` `.join could not be undone at all."""
+        import shlex
+
+        argv = ["deploy.sh", "--target", "/var/lib/My App", "--force"]
+        with TmpConf() as c:
+            with stub_ssh():
+                shunt_mod.cmd_bg(["@h1"] + argv)
+            logged = c.lines()[0].split("[bg] ", 1)[1]
+            self.assertEqual(shlex.split(logged), argv)
 
     def test_bg_stop_is_recorded(self):
         """Stopping a job changes the far machine too — one line for every shape of bg."""

@@ -462,5 +462,82 @@ class TestWhatFailsAroundTheEditIsSaid(EditCase):
         self.assertEqual(self.bytes_of(path), self.ORIGINAL)
 
 
+# ── the verify itself, when IT is what fails ───────────────────────────────────
+
+# The read-back was the one step here left bare while its twin in write_helper stood
+# guarded. The sabotage lets the FIRST read through (the helper has to find its match) and
+# breaks the second — the read-back — which is the only way to reach that line at all.
+BREAK_THE_READ_BACK = """
+import builtins
+_real = builtins.open
+_seen = {}
+def _the_second_read_fails(file, mode="r", *a, **k):
+    if mode == "rb":
+        _seen[file] = _seen.get(file, 0) + 1
+        if _seen[file] >= 2:
+            raise OSError(5, "Input/output error")
+    return _real(file, mode, *a, **k)
+builtins.open = _the_second_read_fails
+"""
+
+
+class TestAVerifyThatCannotReadIsStillAnAnswer(EditCase):
+    """The read-back can fail on its own — a permission changed between the write and the
+    check, an I/O error, the path swapped for a directory.
+
+    Bare, it took the helper down with a traceback where its answer belongs, and the caller
+    read that as `unexpected response` about a file that IS already written: exactly the
+    lie the verify-after-write exists to make impossible, arriving through the verify. Its
+    twin in write_helper had been wrapped; this one had not, and that asymmetry is what is
+    being taken away.
+
+    Parsing the answer at all is half the test: on the old code there is no JSON to parse.
+    """
+
+    ORIGINAL = b"listen 80;\n"
+    EDITED = b"listen 8080;\n"
+
+    def _payload(self, path):
+        return {"file": path, "old": "listen 80;", "new": "listen 8080;", "expected": 1}
+
+    def test_it_answers_in_json_instead_of_dying(self):
+        path = self.make(self.ORIGINAL)
+        result = run_with_broken_os(self._payload(path), BREAK_THE_READ_BACK)
+        self.assertEqual(result["status"], "error", result)
+
+    def test_the_reason_is_named(self):
+        path = self.make(self.ORIGINAL)
+        result = run_with_broken_os(self._payload(path), BREAK_THE_READ_BACK)
+        self.assertIn("verify-read failed", result["message"])
+        self.assertIn("Input/output error", result["message"])
+
+    def test_unproven_is_not_the_same_word_as_wrong(self):
+        """`verify mismatch` says the write is proven WRONG; this one says it is UNPROVEN,
+        and a caller acts differently on each. new_sha is null because there is none — not
+        a hash of something nobody read."""
+        path = self.make(self.ORIGINAL)
+        result = run_with_broken_os(self._payload(path), BREAK_THE_READ_BACK)
+        self.assertNotIn("mismatch", result["message"])
+        self.assertFalse(result["verified"])
+        self.assertIsNone(result["new_sha"])
+
+    def test_the_edit_landed_and_the_answer_still_says_where(self):
+        """os.replace already happened. The answer keeps the facts that were established
+        before the read-back — which file, how many matches — because they are true."""
+        path = self.make(self.ORIGINAL)
+        result = run_with_broken_os(self._payload(path), BREAK_THE_READ_BACK)
+        self.assertEqual(self.bytes_of(path), self.EDITED)
+        self.assertEqual(result["resolved_path"], path)
+        self.assertEqual(result["count"], 1)
+
+    def test_a_read_that_works_is_untouched(self):
+        """The guard may not change the ordinary answer."""
+        path = self.make(self.ORIGINAL)
+        result = run_via_argv(self._payload(path))
+        self.assertEqual(result["status"], "ok", result)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["new_sha"], sha256(self.EDITED))
+
+
 if __name__ == "__main__":
     unittest.main()

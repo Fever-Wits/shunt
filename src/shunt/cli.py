@@ -53,8 +53,9 @@ CONF = os.environ.get("SHUNT_CONF", os.path.expanduser("~/.config/shunt"))
 SELF_DIR = os.path.dirname(os.path.realpath(__file__))
 HELPER = os.path.join(SELF_DIR, "edit_helper.py")
 WRITE_HELPER = os.path.join(SELF_DIR, "write_helper.py")
-SOCK = "/tmp/shunt-cm-cli-%r@%h:%p.sock"  # PER-DESTINATION (%r/%h/%p filled in by ssh) —
-# otherwise a shared socket → ControlMaster sends one host's commands to another (silent, dangerous bug)
+SOCK_NAME = "shunt-cm-cli-%r@%h:%p.sock"  # PER-DESTINATION (%r/%h/%p filled in by ssh) —
+# otherwise a shared socket → ControlMaster sends one host's commands to another (silent,
+# dangerous bug). Where it LIVES is the other half of the same question — see control_path().
 MANIFEST = os.path.join(CONF, "checkouts", "manifest.json")
 
 
@@ -91,6 +92,52 @@ def ssh_argv(host):
     return ["ssh"] + ssh_opts(host) + [host["target"]]
 
 
+def control_path():
+    """The CLI's ControlMaster socket — and the private directory it needs, made on the way.
+
+    It used to be `/tmp/shunt-cm-cli-%r@%h:%p.sock`. The NAME has to stay predictable: the
+    whole point of a muxed socket is that the NEXT `shunt` call finds the master this one left
+    behind, and a random name would fix the exposure by destroying the feature. The hook's twin
+    can afford /tmp because its name carries a session id nobody can guess; this one carries
+    none — `%r` is the REMOTE account, and the local uid appears nowhere. So on a shared machine
+    two different LOCAL users reaching the same target compute the same path in a world-writable
+    directory. The PLACE moves instead — the same fix the far side's cwd state got when it left
+    /tmp for ~/.cache/shunt.
+
+    XDG_RUNTIME_DIR first: per-user, 0700 by its own spec, on tmpfs, taken away at logout —
+    exactly the lifetime a control socket wants. It is absent in cron, in a container, under
+    `ssh host shunt …`; ~/.cache is the fallback, which is where shunt already keeps state.
+
+    `-m 700` applies at CREATION only, so a directory that is already there keeps the
+    permissions its owner gave it — the same choice, for the same reason, as _state_write's
+    mkdir on the far side. Neither base is world-writable, so the squat this fix is about
+    cannot be set up in either.
+
+    Best-effort, and silent, on purpose: MEASURED — ssh whose ControlPath directory does not
+    exist still connects (at -v: "Control socket … does not exist", then a plain connection).
+    What a failed mkdir costs is connection REUSE, not the command, and the only moment to
+    report it would be before every single CLI call.
+
+    ⚠ Length. ssh expands %r/%h/%p and then REFUSES a path that does not fit a unix socket —
+    "ControlPath too long … >= 108 bytes", exit 255, no connection attempted: fatal, not a
+    fallback. Measured: 107 bytes is the longest path that binds on Linux, macOS allows 103.
+    The move spent ~18 bytes against /tmp, and a destination of ordinary size — a six-letter
+    account, a 38-character FQDN, port 22 — lands around 87, so ~16 are left even on macOS
+    (test_ssh_opts pins that budget). A destination long enough to spend the rest fails
+    LOUDLY, in ssh's own words; a fallback to /tmp for that case would quietly restore the
+    very exposure this function ends.
+    """
+    base = os.environ.get("XDG_RUNTIME_DIR") or ""
+    if not (base.startswith("/") and os.path.isdir(base)):
+        base = os.path.expanduser("~/.cache")
+    d = os.path.join(base, "shunt")
+    try:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+    except Exception:
+        pass  # see the docstring: no directory costs reuse, not the connection
+    return os.path.join(d, SOCK_NAME)
+
+
 def ssh_opts(host):
     """The ssh options every hand shares — ONE place, so they cannot drift apart.
 
@@ -108,7 +155,7 @@ def ssh_opts(host):
         "-o",
         "ControlMaster=auto",
         "-o",
-        "ControlPath=" + SOCK,
+        "ControlPath=" + control_path(),
         "-o",
         "ControlPersist=300",
         "-o",
@@ -299,8 +346,15 @@ def cmd_bg(argv):
     sa = ssh_argv(host)
     rest = argv[1:]
     # one line for every shape of bg — starting a job, stopping one, asking about them:
-    # what the CLI asked that host to do is exactly what the log is read for
-    audit_cli("bg", host["alias"], " ".join(rest))
+    # what the CLI asked that host to do is exactly what the log is read for.
+    # Quoted with shlex.join, the same hand that assembles the command actually sent (below,
+    # and in cmd_run): ` `.join wrote `rm -rf /var/lib/My App` for an argument that was ONE
+    # path, so the log said two. The audit line is the standing answer to "what did I run on
+    # somebody else's machine" — a witness that quotes differently from the executor is worse
+    # than no witness. The line still records the invocation AS TYPED (that is what keeps
+    # --list/--status/--stop in the log at all), so a `--name` is in it and a single quoted
+    # argument comes back quoted; both now read back unambiguously with shlex.split.
+    audit_cli("bg", host["alias"], shlex.join(rest))
     if rest[0] == "--list":
         # No `|| true` here. `list-units` already exits 0 when the glob matches nothing,
         # so the guard never bought the empty list anything — it only paid out when the
@@ -803,7 +857,22 @@ def cmd_commit(argv):
         try:
             result = json.loads(raw_out)
         except Exception:
-            print(f"ERROR {local} — unexpected response: {raw_out[:200]}")
+            # The helper answers in JSON and in nothing else, so an unparseable answer means
+            # it never got to answer: no python3 over there, a process killed, a permission
+            # that stopped it at the first import. All of that arrives as an exit code and a
+            # traceback on STDERR — and both were dropped on the floor here, leaving the
+            # caller "unexpected response: " with an empty stdout and nowhere to look.
+            # Shown only on THIS branch: on a write that worked, the far side's stderr is
+            # login banners and warnings, and a commit that succeeded must not read like
+            # trouble. The last lines and not the first — a traceback keeps its message at
+            # the end, and that message is the diagnosis.
+            print(
+                f"ERROR {local} — unexpected response (ssh exit {r2.returncode}): "
+                f"{raw_out[:200] or '(nothing on stdout)'}"
+            )
+            said = (r2.stderr or b"").decode("utf-8", "replace").strip()
+            for line in said.splitlines()[-20:]:
+                print(f"    {line}")
             overall_rc = 1
             continue
 

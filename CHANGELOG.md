@@ -7,10 +7,42 @@ and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
 ## [Unreleased]
 
-One theme: **the tool answering for something it did not do.** Four places where a failure
-had no voice — a hook that died, a command re-split on the way out, a pull that ate the
-work it was asked to refresh, and two writes that reported the wrong thing about
-themselves. One entry changes behaviour you may have relied on; it is marked ⚠.
+One theme: **the tool answering for something it did not do.** Places where a failure had
+no voice — a hook that died, a command re-split on the way out, a pull that ate the work it
+was asked to refresh, writes that reported the wrong thing about themselves, a warning that
+looked at the wrong word, and a socket that trusted a directory anyone can write to.
+Entries that change behaviour you may have relied on are marked ⚠.
+
+### Security
+
+- **The CLI's ControlMaster socket left `/tmp`.** ⚠ **Behaviour change for anyone already
+  running shunt** — see *What you will notice* below. It was
+  `/tmp/shunt-cm-cli-%r@%h:%p.sock`: a name anybody can work out, in a directory anybody can
+  write to. `%r` is the *remote* account, so nothing in that name belongs to the local user
+  — on a shared machine two different local users reaching the same target computed the very
+  same path. The hook's own socket carries a per-session id and cannot be guessed; this one
+  has to stay predictable, because a multiplexed socket is only worth having if the *next*
+  `shunt` call finds the master the last one left behind. Randomising the name would have
+  closed the hole by removing the reason the socket exists, so the **place** moved instead:
+  `$XDG_RUNTIME_DIR/shunt/` when the environment offers one (per-user, `0700` by its own
+  spec, on tmpfs, cleared at logout), `~/.cache/shunt/` otherwise, created with mode `700`.
+  The name itself is unchanged. The hook's socket stays where it was, and that asymmetry is
+  deliberate — it is documented in `ARCHITECTURE.md` and `SECURITY.md`.
+
+  **What you will notice:** the first `shunt` call after upgrading opens a fresh connection
+  instead of reusing the master under the old path — once, not every time. A master still
+  listening on `/tmp` is orphaned by the move: nothing will reuse it, and it closes itself
+  after `ControlPersist` (5 minutes), deleting its socket on the way out. There is nothing
+  to clean up by hand; a stale `/tmp/shunt-cm-cli-*.sock` left by a master that was killed
+  rather than closed can be removed at your leisure. If the private directory cannot be
+  created, commands still run — what is lost is connection reuse, not the command.
+
+  Measured while moving it, because it decides the design: a `ControlPath` that does not fit
+  a unix socket is **fatal** — `ControlPath too long … >= 108 bytes`, exit 255, no connection
+  attempted. 107 bytes is the longest that binds on Linux and macOS allows 103; the new
+  location costs about 18 bytes more than `/tmp`, and an ordinary destination (a six-letter
+  account, a 38-character FQDN, port 22) lands near 87. Falling back to `/tmp` for a longer
+  one was rejected: it would restore the exposure silently, in the one case nobody watches.
 
 ### Added
 
@@ -66,6 +98,44 @@ themselves. One entry changes behaviour you may have relied on; it is marked ⚠
 
 ### Fixed
 
+- **A flag's value is no longer mistaken for the command it hides.** `sudo -u www rm -rf
+  /srv/x` produced **no warning at all**: the scan steps over the words that stand in front
+  of a command (`sudo`, then anything beginning with `-`), so it stepped over `-u` and took
+  `www` — the flag's value — for the command, and never looked at the `rm` behind it. The
+  loudest line this hook has was silent on the shape that most often carries a destructive
+  command: one run as another account. Options that keep their value in the next word are
+  now stepped over with it, for `sudo` and `doas`, bundles included (`-nu www`). The list is
+  bounded by one rule — an option whose value cannot itself *be* a command — which is why
+  `env` is not in it (`env -S 'rm -rf /x'` hands over a command, and skipping it would skip
+  the answer) and why `sudo -h` is not either (`--help` and `--host` at once, decided by what
+  follows). `-uwww` and `--user=www` carry the value inside the word and always worked.
+- **`shunt commit` says why the far-side helper never answered.** The helper is run with its
+  output captured, but only **stdout** was read. When it did not get as far as answering — no
+  `python3` over there, the process killed, a permission that stopped it at the first import
+  — stdout is empty and everything explaining it is in stderr and the exit code, both of
+  which went on the floor. The report was `ERROR /path — unexpected response: ` and nothing
+  else. It now names the ssh exit code, says *(nothing on stdout)* rather than trailing off,
+  and prints the last lines of the far side's stderr under the file they belong to. Only on
+  that branch: on a write that landed, remote stderr is login banners, and a commit that
+  succeeded must not read like trouble.
+- **The edit helper's read-back can fail without taking the helper down.** After writing, it
+  reads the file again to prove the content landed. That read was unguarded, so a permission
+  changed mid-flight, an I/O error, or the path swapped for a directory killed the helper
+  with a traceback where its JSON answer belongs — and the caller read *that* as
+  `unexpected response` about a file that **was** already written: precisely the lie the
+  read-back exists to prevent, arriving through the read-back. It now answers
+  `verify-read failed: …` beside `status: error`, keeping the facts already established
+  (which file, how many matches) and reporting `verified: false` with a null `new_sha` —
+  unproven, which is not the same claim as *proven wrong*. Its twin in the write helper had
+  been guarded all along; this closes the asymmetry.
+- **The audit line for `shunt bg` quotes the way the command does.** The command sent to the
+  far side is assembled with `shlex.join`; its log line was assembled with a plain space
+  join, so an argument containing a space was recorded as two. The log is the standing answer
+  to *what did I run on somebody else's machine*, and a witness that quotes differently from
+  the executor is worse than no witness. The line still records the invocation as typed — so
+  `--list`, `--status` and `--stop` stay in the log — and now reads back with `shlex.split`
+  into exactly the arguments that were given. Log lines written before this change are
+  unaffected and still say what they said.
 - **`shunt bg` no longer re-splits the command it was given.** It joined the remaining
   arguments with spaces and handed the result to `bash -lc` over there, so
   `shunt bg @web-01 rm -rf "/var/lib/My App"` arrived as `rm -rf /var/lib/My App` — two

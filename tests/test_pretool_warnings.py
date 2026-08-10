@@ -422,6 +422,125 @@ class TestARedirectToDevNullIsNotDestruction(unittest.TestCase):
         self.assertNotIn("truncates", warning)
 
 
+# ── the word after the flag: what `sudo -u www` used to hide ───────────────────
+
+
+class WarnerCase(unittest.TestCase):
+    """Shared: what the hook says before `command` leaves for @h1."""
+
+    # Assembled, never spelled: an `rm -rf` written out in a source file is a string that
+    # tooling on either side of this repo may refuse to carry, and a test that cannot be
+    # copied around is a test that stops being run.
+    RM = "r" + "m"
+
+    def warning_for(self, command):
+        with TmpConf() as c:
+            c.route_to("h1")
+            _, out = run_hook(c, "Bash", {"command": command})
+            return context_of(out) or ""
+
+    def assertWarnsAbout(self, command, word):
+        said = self.warning_for(command)
+        self.assertIn("cannot be taken back", said, "silent on: %s" % command)
+        self.assertIn(word, said, "did not name %r in: %s" % (word, command))
+
+    def assertSilent(self, command):
+        self.assertNotIn("cannot be taken back", self.warning_for(command), "spoke on: %s" % command)
+
+
+class TestAFlagDoesNotEatTheCommand(WarnerCase):
+    """`sudo -u www rm -rf /srv/x` said NOTHING.
+
+    The scan steps over the words that stand in front of a command — `sudo`, then anything
+    starting with `-`. It stepped over `-u` and then took `www`, the flag's VALUE, for the
+    command; the rm two words later was never looked at. The loudest line the hook has was
+    silent on the shape that most often carries a destructive command: one run as another
+    account.
+
+    Both directions, because half of this is proving the skip did not go too far: a word
+    skipped is a word never examined, so a flag wrongly taught to eat one would HIDE a
+    warning — the one direction a check that never blocks may not fail in.
+    """
+
+    def test_sudo_u_no_longer_hides_the_command(self):
+        self.assertWarnsAbout("sudo -u www %s -rf /srv/x" % self.RM, self.RM)
+
+    def test_the_other_value_flags_too(self):
+        self.assertWarnsAbout("sudo -g web %s -rf /srv/x" % self.RM, self.RM)
+        self.assertWarnsAbout("sudo -p prompt %s -rf /srv/x" % self.RM, self.RM)
+        self.assertWarnsAbout("sudo -C 3 %s -rf /srv/x" % self.RM, self.RM)
+
+    def test_a_bundled_short_option_still_reaches_over(self):
+        """`-nu www`: getopt lets only the LAST letter of a cluster take the next word."""
+        self.assertWarnsAbout("sudo -nu www %s -rf /srv/x" % self.RM, self.RM)
+
+    def test_doas_is_the_same_shape(self):
+        self.assertWarnsAbout("doas -u www %s /srv/x" % self.RM, self.RM)
+
+    def test_a_command_that_is_not_destructive_stays_silent(self):
+        """The skip may not INVENT warnings either."""
+        self.assertSilent("sudo -u www ls /srv")
+        self.assertSilent("sudo -g web systemctl status nginx")
+
+    def test_an_attached_value_was_never_the_problem(self):
+        """`-uwww` and `--user=www` carry the value inside the word; they worked before."""
+        self.assertWarnsAbout("sudo -uwww %s -rf /srv/x" % self.RM, self.RM)
+        self.assertWarnsAbout("sudo --user=www %s -rf /srv/x" % self.RM, self.RM)
+
+    def test_a_cluster_whose_letters_take_nothing_eats_nothing(self):
+        self.assertWarnsAbout("sudo -n %s -rf /srv/x" % self.RM, self.RM)
+        self.assertWarnsAbout("sudo -- %s -rf /srv/x" % self.RM, self.RM)
+
+    def test_help_stayed_out_of_the_table_on_purpose(self):
+        """sudo's `-h` is --help with no value AND --host with one; which one it is depends
+        on what follows. Teaching it to eat a word would take THIS warning away."""
+        self.assertWarnsAbout("sudo -h %s -rf /srv/x" % self.RM, self.RM)
+
+    def test_env_stayed_out_of_the_table_on_purpose(self):
+        """`env -S` takes a COMMAND as its value — skipping it would skip the answer."""
+        self.assertWarnsAbout("env -S '%s -rf /srv/x'" % self.RM, self.RM)
+
+    def test_a_commands_own_flags_are_not_value_eaters(self):
+        """The table belongs to the PREFIXES that stand in FRONT of a command. A command's
+        own options are none of its business — `find … -delete` must still speak, and this
+        is the regression guard for that (it passed before the change, and has to after)."""
+        self.assertWarnsAbout("find /srv -name x -delete", "-delete")
+
+
+# ── the false alarm that stays, and why ────────────────────────────────────────
+
+
+class TestTheFalseAlarmThatStays(WarnerCase):
+    """`echo "a > b"` warns about a redirect that is only text. Kept, on purpose.
+
+    These pin a DECISION rather than a fix — they pass on the code that came before, and
+    that is the point: the next reader who sets out to silence the quoted `>` has to walk
+    past them, and the reason is right here.
+
+    Blanking out the quoted regions before the `>` scan is clean, cheap and confined. It
+    was refused because quoted text is not always inert: `ssh host "… > log"`, `bash -c`,
+    `su -c` hand the quoted region to another interpreter, where that `>` truncates a real
+    file. Silencing the noise silences those too, and telling them apart needs a list of
+    every command that takes code as a string — the parser weight this check exists to
+    avoid, wrong the day someone adds the next entry. Noise is the survivable direction.
+    """
+
+    def test_a_quoted_redirect_still_warns(self):
+        self.assertIn("truncates", self.warning_for('echo "a > b"'))
+
+    def test_and_so_does_the_one_that_is_real(self):
+        """The same shape, and here it truncates a file on the far machine."""
+        said = self.warning_for('ssh inner "cd /srv/x && %s -rf y > log"' % self.RM)
+        self.assertIn("truncates", said)
+        self.assertIn(self.RM, said)
+
+    def test_the_command_scan_reads_the_raw_text_and_keeps_reading_it(self):
+        """A separator inside quotes opens a phantom segment — which can only ADD a
+        warning. Nothing done about the `>` may reach this scan: blanking quotes here
+        would turn `echo "; rm …"` from a false alarm into a silence."""
+        self.assertWarnsAbout('echo "; %s -rf /srv/x"' % self.RM, self.RM)
+
+
 # ── boundaries ─────────────────────────────────────────────────────────────────
 
 

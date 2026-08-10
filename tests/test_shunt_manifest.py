@@ -1215,3 +1215,79 @@ class TestCommitPush(unittest.TestCase):
         rc, out, _ = self._commit_with_helper_warnings([])
         self.assertEqual(rc, 0)
         self.assertNotIn("⚠", out)
+
+
+# ── when the helper never got to answer ────────────────────────────────────────
+
+
+class TestTheHelperCrashIsReadable(unittest.TestCase):
+    """`ERROR … unexpected response: ` — and nothing else. That was the whole report.
+
+    The far side is driven with `capture_output=True`, but only STDOUT was ever read. If
+    the helper never got to answer — no python3 over there, the process killed, a
+    permission that stopped it at the first import — stdout is empty and everything that
+    says WHY is in stderr and in the exit code. Both went on the floor, and the caller was
+    left with a message that names the failure without naming a cause.
+
+    The other half is when NOT to speak: on a push that worked, the far side's stderr is
+    login banners and MOTD, and a commit that succeeded may not read like trouble.
+    """
+
+    _setup_conf = TestCommitPush._setup_conf
+
+    def _commit_with(self, helper_rc, helper_stdout, helper_stderr):
+        local_content = b"edited content\n"
+        call_count = {"n": 0}
+
+        def fake_run(cmd, **kwargs):
+            m = MagicMock()
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                m.returncode = 0
+                m.stdout = (sha256(local_content) + "  /remote/file.py\n").encode()
+                m.stderr = b""
+            else:
+                m.returncode = helper_rc
+                m.stdout = helper_stdout
+                m.stderr = helper_stderr
+            return m
+
+        with TmpConf() as conf:
+            self._setup_conf(conf, local_content)
+            with patch("subprocess.run", side_effect=fake_run):
+                with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+                    rc = shunt_mod.cmd_commit([])
+            return rc, mock_out.getvalue()
+
+    CRASH = b'Traceback (most recent call last):\n  File "<stdin>", line 12\nPermissionError: [Errno 13] Permission denied\n'
+
+    def test_the_reason_reaches_the_caller(self):
+        rc, out = self._commit_with(1, b"", self.CRASH)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("Permission denied", out)
+
+    def test_the_exit_code_is_named_too(self):
+        """A helper that said nothing at all leaves the exit code as the only fact there
+        is, and "1" versus "255" is ssh's failure versus the helper's."""
+        rc, out = self._commit_with(255, b"", b"")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("255", out)
+
+    def test_an_empty_answer_is_called_empty(self):
+        """`unexpected response: ` with nothing after the colon reads like a truncation."""
+        _, out = self._commit_with(255, b"", b"")
+        self.assertIn("nothing on stdout", out)
+
+    def test_a_partial_answer_is_still_shown(self):
+        """Whatever DID arrive is evidence — it says how far the helper got."""
+        _, out = self._commit_with(0, b"{not json", b"")
+        self.assertIn("{not json", out)
+
+    def test_a_successful_push_says_nothing_about_stderr(self):
+        """The banner case: stderr on a write that landed is noise, and this hand prints a
+        line per file. Silence here is the difference between a report and wallpaper."""
+        local_content = b"edited content\n"
+        ok = json.dumps({"status": "ok", "new_sha": sha256(local_content), "verified": True}).encode()
+        rc, out = self._commit_with(0, ok, b"Welcome to Ubuntu 24.04 LTS\nLast login: never\n")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("Welcome to Ubuntu", out)

@@ -225,20 +225,34 @@ def main():
         )
 
     # verify-after-write (our niche — no SSH MCP does this)
-    with open(path, "rb") as f:
-        vsha = sha256(f.read())
-    ok = vsha == sha256(new_bytes)
+    # The read is GUARDED, the way write_helper guards its twin. Bare, it could raise on its
+    # own — a permission changed between the write and the check, a filesystem error, the path
+    # replaced by a directory — and the helper would then die with a traceback where its answer
+    # belongs. The caller reads that as "unexpected response" about a file that IS already
+    # written: the exact lie this verify exists to make impossible, arriving through the verify
+    # itself. The two helpers were written apart and only this one was left bare; that
+    # asymmetry is what is being taken away.
+    # "could not read it back" and "read it back and it is wrong" are kept as separate
+    # messages: one says the write is unproven, the other says it is proven wrong, and a
+    # caller acts differently on each.
+    try:
+        with open(path, "rb") as f:
+            vsha = sha256(f.read())
+    except Exception as e:
+        vsha, failure = None, f"verify-read failed: {e}"
+    else:
+        failure = None if vsha == sha256(new_bytes) else "verify mismatch after write"
     res = {
-        "status": "ok" if ok else "error",
+        "status": "ok" if failure is None else "error",
         "count": count,
         "new_sha": vsha,
-        "verified": ok,
+        "verified": failure is None,
         "diff": diff,
         "normalized": normalized,
         "resolved_path": path,
     }
-    if not ok:
-        res["message"] = "verify mismatch after write"
+    if failure:
+        res["message"] = failure
     if warnings:
         # Present only when there IS one, so the ordinary answer keeps the exact shape
         # every reader of it already knows.

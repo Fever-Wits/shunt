@@ -177,13 +177,25 @@ drift apart.
   master connection alive, so later commands skip the TCP and auth handshake.
 - **Per-session, per-destination control socket.** The hook's socket path embeds
   the agent session id **and** the ssh `%r`/`%h`/`%p` tokens:
-  `/tmp/shunt-cm-<sid>-%r@%h:%p.sock` — the same shape the CLI uses. Per-session
+  `/tmp/shunt-cm-<sid>-%r@%h:%p.sock`. Per-session
   keeps parallel agent sessions from colliding; per-destination prevents the
   dangerous silent bug where two different hosts in one session would share a
   master and one host's commands would be delivered to the other. The `%r` is
   the ssh **user**: the config allows two aliases onto one machine with
   different accounts (`deploy@web-01`, `root@web-01`), and without it the second
   would ride the first one's master and run as the wrong account.
+- **The CLI's socket keys on the same tokens, and lives somewhere else.**
+  `shunt-cm-cli-%r@%h:%p.sock` in `$XDG_RUNTIME_DIR/shunt/` when the environment
+  offers one, `~/.cache/shunt/` otherwise, created at mode 700. The asymmetry is
+  the point: the hook's name carries a session id and cannot be guessed, so a
+  world-writable directory hands nobody a path to occupy first, and the sandbox
+  the rewritten command runs in may not share a private directory of ours. The
+  CLI has no such part in its name — it must stay predictable, because the whole
+  value of a muxed socket is that the *next* `shunt` call finds the master the
+  last one left — so its **place** carries the privacy instead. A `ControlPath`
+  too long for a unix socket is fatal (ssh exits 255 without connecting), which
+  makes the directory a budget: an ordinary destination lands near 87 bytes of
+  the 103 the strictest platform allows.
 - **`BatchMode=yes` / `StrictHostKeyChecking=accept-new`** keep it
   non-interactive and first-connect-friendly.
 
@@ -332,9 +344,12 @@ accounts (`deploy@web-01`, `root@web-01`) keep separate directories for the same
 reason. Two aliases that land in the **same** account on the same machine are the
 one case that does carry over — one home, one file, one shell world — so
 switching between them keeps the directory. The ControlMaster socket is the local
-counterpart of the same rule (per session *and* per destination); it is the one
-path that stays in `/tmp`, on purpose, because it is a local file meant to die
-with the machine.
+counterpart of the same rule (per session *and* per destination). The hook's stays
+in `/tmp`, on purpose — a local file meant to die with the machine, under a name
+carrying a session id that nobody outside can guess. The CLI's cannot borrow that
+argument, because its name has to stay predictable to be reused between calls, so
+it lives in a private per-user directory instead; see the control-socket entry
+above.
 
 ⚠ **The CLI does not read that state at all** — `ssh_argv()` carries no `cd`, so
 every `shunt run` / `read` / `edit` / `get` starts in the ssh **login** directory
