@@ -1,37 +1,37 @@
 """
-Tests for shunt.pretool — the `shunt ` prefix speaks for ONE command, not for a whole line.
+Tests for shunt.pretool - the `shunt ` prefix speaks for ONE command, not for a whole line.
 
-`shunt …` is the one thing the hook must NOT redirect: the CLI does its own transport, so
+`shunt ...` is the one thing the hook must NOT redirect: the CLI does its own transport, so
 it belongs on this machine in any mode. The prefix was read off the START of the line,
 though, and a line has room for more than one command. In remote mode
-`shunt hosts; rm -rf /var/log/*` therefore ran WHOLE, here, and said nothing — while the
+`shunt hosts; rm -rf /var/log/*` therefore ran WHOLE, here, and said nothing - while the
 mirror of that mistake (a shunt command sent to a host) comes back loudly as "command not
 found". The guarded direction was the cheap one.
 
 The fix lets through only a line that can hold no second command, and refuses the rest the
 way this file already refuses an unresolvable alias: the command is REPLACED by a message,
 so what runs is an echo and never the line. Refusing rather than warning, because a
-warning does not stop anything — and this is the case that must be stopped.
+warning does not stop anything - and this is the case that must be stopped.
 
 Coverage:
-  - the two lines the audit proved: `;` and `&&` — neither reaches the shell any more, and
+  - the two lines the audit proved: `;` and `&&` - neither reaches the shell any more, and
     the destructive half is nowhere in what does run
   - refusing means neither machine runs it: no ssh either, and no `rm` anywhere in it
-  - it is a rewrite, not a block — the exit code stays 0, as everywhere in this hook
+  - it is a rewrite, not a block - the exit code stays 0, as everywhere in this hook
   - every separator that can begin a command is seen: ; & | ` $ ( and a newline
-  - a single `shunt …` line, and a bare `shunt`, still run here untouched — including
-    `shunt run @h "…"`, the shape the hook's own warning recommends
+  - a single `shunt ...` line, and a bare `shunt`, still run here untouched - including
+    `shunt run @h "..."`, the shape the hook's own warning recommends
   - a LOCAL session is left alone: nothing is routed anywhere, so `shunt hosts | grep web`
     is ordinary work and a refusal there would be pure noise
   - the message names the host, the separator it saw, and the way out
   - a routing state that cannot be read refuses too, without inventing a host
-  - THE MIRROR SHAPE: `shunt …` that is not the first word of the line
-    (`cat f | shunt edit @h1 /x --stdin`) — no prefix, so nothing above ever saw it, and
+  - THE MIRROR SHAPE: `shunt ...` that is not the first word of the line
+    (`cat f | shunt edit @h1 /x --stdin`) - no prefix, so nothing above ever saw it, and
     the whole line was shipped to a host where `shunt` does not exist while the half in
     front of the pipe ran over there on the wrong machine's files
 
-The hook is run as the harness runs it — a subprocess fed JSON on stdin, started BY PATH
-with PYTHONPATH stripped — and SHUNT_CONF points at a temp directory, so no real config or
+The hook is run as the harness runs it - a subprocess fed JSON on stdin, started BY PATH
+with PYTHONPATH stripped - and SHUNT_CONF points at a temp directory, so no real config or
 session state is touched.
 """
 
@@ -52,7 +52,7 @@ from shunt import pretool
 PRETOOL = pretool.__file__
 
 # The two lines the audit ran against a live remote session. Both exited silently, which
-# meant both had just run — here, in full.
+# meant both had just run - here, in full.
 AUDIT_CASES = ("shunt hosts; rm -rf /var/log/*", "shunt log -n 3 && rm -rf ./build")
 
 
@@ -74,7 +74,7 @@ class HookConf:
             f.write(alias)
 
     def break_routing(self, sid="s1"):
-        """The routing file exists and names no host — an emptied or half-written file."""
+        """The routing file exists and names no host - an emptied or half-written file."""
         open(os.path.join(self.dir, "target." + sid), "w").close()
 
 
@@ -93,7 +93,7 @@ def run_hook(conf, command, sid="s1"):
 
 
 def ran_instead(stdout):
-    """The command the hook put in place of the caller's — None when it said nothing.
+    """The command the hook put in place of the caller's - None when it said nothing.
 
     None is the answer that matters here: silence from this hook means the caller's own
     line went to the shell untouched.
@@ -103,7 +103,7 @@ def ran_instead(stdout):
     return json.loads(stdout)["hookSpecificOutput"]["updatedInput"]["command"]
 
 
-# ── the two lines the audit proved ─────────────────────────────────────────────
+# -- the two lines the audit proved ---------------------------------------------
 
 
 class TestTheTwoProvenCases(unittest.TestCase):
@@ -112,7 +112,7 @@ class TestTheTwoProvenCases(unittest.TestCase):
             c.route_to("h1")
             code, out = run_hook(c, line)
             said = ran_instead(out)
-            self.assertIsNotNone(said, "the hook said nothing — which means this line ran, here, whole")
+            self.assertIsNotNone(said, "the hook said nothing - which means this line ran, here, whole")
             return code, said
 
     def test_neither_is_let_through(self):
@@ -145,7 +145,7 @@ class TestTheTwoProvenCases(unittest.TestCase):
 
     def test_the_refusal_is_still_exit_zero(self):
         """A rewrite, not a block. The exit code is the harness' own channel and this hook
-        has never spoken through it — every path here ends in `sys.exit(0)`. What stops the
+        has never spoken through it - every path here ends in `sys.exit(0)`. What stops the
         command is the JSON, exactly as it is for an unresolvable alias."""
         for line in AUDIT_CASES:
             with self.subTest(line=line):
@@ -153,7 +153,7 @@ class TestTheTwoProvenCases(unittest.TestCase):
                 self.assertEqual(code, 0)
 
 
-# ── the whole class, not the two instances ─────────────────────────────────────
+# -- the whole class, not the two instances -------------------------------------
 
 
 class TestEverySeparatorThatCanBeginACommand(unittest.TestCase):
@@ -168,7 +168,7 @@ class TestEverySeparatorThatCanBeginACommand(unittest.TestCase):
         "pipe": "shunt hosts | xargs rm -rf",
         "backtick": "shunt run @h1 `rm -rf ./build`",
         "substitution": "shunt run @h1 $(rm -rf ./build)",
-        # Not a shell anyone would write — the `(` is what is under test, and it arrives
+        # Not a shell anyone would write - the `(` is what is under test, and it arrives
         # on its own in a subshell as surely as it does inside `$(`.
         "paren": "shunt run @h1 (rm -rf ./build)",
         "newline": "shunt hosts\nrm -rf /var/log/*",
@@ -182,11 +182,11 @@ class TestEverySeparatorThatCanBeginACommand(unittest.TestCase):
                 self.assertIsNotNone(ran_instead(out), f"{name} got through: the line ran here, whole")
 
 
-# ── what must keep working ─────────────────────────────────────────────────────
+# -- what must keep working -----------------------------------------------------
 
 
 class TestASingleShuntCommandStillRunsHere(unittest.TestCase):
-    """The reason the branch exists at all — it must not become collateral damage."""
+    """The reason the branch exists at all - it must not become collateral damage."""
 
     PLAIN = (
         "shunt",
@@ -194,6 +194,10 @@ class TestASingleShuntCommandStillRunsHere(unittest.TestCase):
         "shunt log -n 3",
         "shunt read @h1 /etc/hosts",
         'shunt run @h1 "grep -rn PATTERN /path"',
+        # A bare `$` cannot introduce a second command - only `$(` can - so a legitimate
+        # variable reference must pass through untouched.
+        'shunt read @h1 "$f"',
+        "shunt cp $HOME/x @h1:/tmp/",
     )
 
     def test_they_pass_through_untouched_in_remote_mode(self):
@@ -221,12 +225,12 @@ class TestALocalSessionIsLeftAlone(unittest.TestCase):
             self.assertEqual(out.strip(), "")
 
 
-# ── what the refusal says ──────────────────────────────────────────────────────
+# -- what the refusal says ------------------------------------------------------
 
 
 class TestWhatTheRefusalSays(unittest.TestCase):
     """A refusal that does not carry its way out is a wall. The false positives of a check
-    this blunt — `shunt hosts | grep web` in remote mode — are paid for here, in one line
+    this blunt - `shunt hosts | grep web` in remote mode - are paid for here, in one line
     the reader can act on."""
 
     def test_it_names_the_host_and_the_way_out(self):
@@ -253,13 +257,22 @@ class TestWhatTheRefusalSays(unittest.TestCase):
             self.assertIn("newline", said)
             self.assertNotIn("\n", said)
 
+    def test_a_substitution_is_named_whole(self):
+        """`$(` is spelled out in SHELL_BREAK only so it can be NAMED here - `(` alone
+        already catches the shape. Collapse the alternation and this line points at the
+        paren inside the substitution, which reads like a subshell nobody wrote."""
+        with HookConf() as c:
+            c.route_to("h1")
+            _, out = run_hook(c, "shunt run @h1 $(rm -rf ./build)")
+            self.assertIn("$(", ran_instead(out))
 
-# ── the routing state this branch cannot read ──────────────────────────────────
+
+# -- the routing state this branch cannot read ----------------------------------
 
 
 class TestAnUnreadableRoutingState(unittest.TestCase):
     """The third state of `target.<sid>` reaches this branch as well. It is not "local",
-    so the line is refused — and the message may not name a host nobody read."""
+    so the line is refused - and the message may not name a host nobody read."""
 
     def test_a_compound_line_is_refused(self):
         with HookConf() as c:
@@ -269,14 +282,14 @@ class TestAnUnreadableRoutingState(unittest.TestCase):
 
     def test_no_sentinel_leaks_into_the_message(self):
         """The unreadable state is an object; formatted into a string it would arrive as
-        `<object object at 0x…>` and teach the reader nothing."""
+        `<object object at 0x...>` and teach the reader nothing."""
         with HookConf() as c:
             c.break_routing()
             _, out = run_hook(c, AUDIT_CASES[0])
             self.assertNotIn("object at", ran_instead(out))
 
     def test_a_single_shunt_command_still_runs_here(self):
-        """`shunt hosts` is how a broken state gets diagnosed — taking it away exactly
+        """`shunt hosts` is how a broken state gets diagnosed - taking it away exactly
         then would be the worst possible moment."""
         with HookConf() as c:
             c.break_routing()
@@ -286,13 +299,13 @@ class TestAnUnreadableRoutingState(unittest.TestCase):
 
 
 class TestShuntPastTheStartOfTheLine(unittest.TestCase):
-    """The mirror of everything above: `shunt …` that is NOT the first word.
+    """The mirror of everything above: `shunt ...` that is NOT the first word.
 
     `cat payload.json | shunt edit @h1 /etc/nginx.conf --stdin` carries no shunt PREFIX,
-    so the guard above never looks at it — and in remote mode the WHOLE line was rewritten
+    so the guard above never looks at it - and in remote mode the WHOLE line was rewritten
     and shipped to a machine where `shunt` is not installed. An older comment called this
     the loud direction, and it is: "command not found", for a tool the caller has, blamed
-    on a machine they were not thinking about. Loud is not clear, and it is not harmless —
+    on a machine they were not thinking about. Loud is not clear, and it is not harmless -
     the half in FRONT of the pipe had already run over there, silently, on the far
     machine's files.
     """
@@ -304,7 +317,7 @@ class TestShuntPastTheStartOfTheLine(unittest.TestCase):
             c.route_to("h1")
             code, out = run_hook(c, line)
             said = ran_instead(out)
-            self.assertIsNotNone(said, "the hook said nothing — the line went to the host whole")
+            self.assertIsNotNone(said, "the hook said nothing - the line went to the host whole")
             self.assertEqual(code, 0, "a refusal here is a rewrite, not a block")
             return said
 
@@ -343,7 +356,7 @@ class TestShuntPastTheStartOfTheLine(unittest.TestCase):
 
     def test_a_local_session_is_left_alone(self):
         """Nothing is routed anywhere, so `shunt` runs here and so does the rest of the
-        line — which is what the caller meant. A refusal here would be pure noise."""
+        line - which is what the caller meant. A refusal here would be pure noise."""
         with HookConf() as c:
             code, out = run_hook(c, self.PIPED)
             self.assertEqual(code, 0)
@@ -360,7 +373,7 @@ class TestShuntPastTheStartOfTheLine(unittest.TestCase):
                     self.assertIn("ssh", ran_instead(out) or "", "%s should have gone to the host" % line)
 
     def test_the_price_is_paid_in_the_cheap_direction(self):
-        """A separator inside quotes costs a refusal nobody needed — the same trade the
+        """A separator inside quotes costs a refusal nobody needed - the same trade the
         guard above makes, and the same reason: the other direction costs a command that
         leaves unnoticed."""
         self.assertIn("NOT run", self.refusal('echo "pipe it: cmd | shunt read @h1 /x"'))

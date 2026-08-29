@@ -1,5 +1,5 @@
 """
-Tests for shunt.cli — the hook line that `shunt install` prints.
+Tests for shunt.cli - the hook line that `shunt install` prints.
 
 What install TELLS you to register must match what the hook actually handles. This is
 the only file guarding that seam: the CLI prints a matcher, the hook acts on a set of
@@ -30,7 +30,7 @@ class TestHookHintMatchesReality(unittest.TestCase):
 
     Found 2026-08-06: install printed `"matcher": "Bash"`, so every fresh install lost the
     mode-boundary warnings entirely. They worked locally only because a human had widened
-    the matcher by hand — the tool never asked for it.
+    the matcher by hand - the tool never asked for it.
     """
 
     def _hint(self):
@@ -44,7 +44,7 @@ class TestHookHintMatchesReality(unittest.TestCase):
             self.assertIn(tool, hint, f"install would not register {tool}")
 
     def test_hint_is_valid_json_fragment(self):
-        """It is copy-pasted into settings.json — a broken quote breaks every hook there."""
+        """It is copy-pasted into settings.json - a broken quote breaks every hook there."""
         hint = self._hint()
         start = hint.index("{")
         json.loads(hint[start : hint.rindex("}") + 1])  # raises if malformed

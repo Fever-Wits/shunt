@@ -1,16 +1,16 @@
 """
-Tests for shunt.pretool — where the far side remembers this session's directory.
+Tests for shunt.pretool - where the far side remembers this session's directory.
 
 The design in one line: the state file is a path for the REMOTE shell, not for os.path.
 That is the whole reason this file exists. `$HOME` names the account we LAND IN over there,
-which is routinely not the one running the hook (local user → remote root), so the path is
+which is routinely not the one running the hook (local user -> remote root), so the path is
 assembled by that shell and never by python. Every way of getting this wrong fails in
-SILENCE — a state file written somewhere nobody reads, or not written at all, looks exactly
+SILENCE - a state file written somewhere nobody reads, or not written at all, looks exactly
 like a session that simply starts in the login directory.
 
 Coverage:
   - the state lives under $HOME/.cache/shunt, and no longer in world-writable /tmp
-  - `$HOME` is left for the far shell, DOUBLE-quoted — no local home baked into a remote
+  - `$HOME` is left for the far shell, DOUBLE-quoted - no local home baked into a remote
     path, and no single quotes (which would send it over as five literal characters)
   - the directory is created before anything writes the file, at mode 700; reading needs
     no directory at all
@@ -21,12 +21,12 @@ Coverage:
     ordinary command (a line there would be wallpaper in the caller's own stderr) and the
     exit code is the command's own
   - the once-per-switch housekeeping: the sweep of dead sessions' files and the ONE probe
-    that says the memory is lost — both only on the first command after `@alias`
+    that says the memory is lost - both only on the first command after `@alias`
   - the marker's whole life through the HOOK: `@alias` arms it, the first command spends
     it, `@local` clears it
   - a marker that CANNOT be spent (a config dir that cannot delete): the reminder keeps
     speaking, the housekeeping does not ride, and the failure is said with path + reason
-    on every command — the two riders of one marker, told apart
+    on every command - the two riders of one marker, told apart
   - the ControlMaster socket deliberately did NOT move (a local path, ~104 chars to live in)
 """
 
@@ -81,7 +81,7 @@ class FakeHome:
         )
 
 
-# ── the path itself ────────────────────────────────────────────────────────────
+# -- the path itself ------------------------------------------------------------
 
 
 class TestThePath(unittest.TestCase):
@@ -90,7 +90,7 @@ class TestThePath(unittest.TestCase):
     get `$HOME` wrong."""
 
     def _both(self, sid="sess-1"):
-        """The payload and the full ssh command around it — both must hold."""
+        """The payload and the full ssh command around it - both must hold."""
         return (pretool._remote_script("ls", sid), pretool.ssh_command(HOST, "ls", sid))
 
     def test_the_state_moved_out_of_tmp(self):
@@ -112,7 +112,7 @@ class TestThePath(unittest.TestCase):
             self.assertNotIn("'$HOME'", text)
 
     def test_no_local_home_is_baked_into_a_remote_path(self):
-        """It would point at a directory that is not on the far machine — and be swallowed
+        """It would point at a directory that is not on the far machine - and be swallowed
         whole, since the write is silenced: the session would forget every `cd` and say
         nothing about it."""
         for text in self._both():
@@ -127,7 +127,7 @@ class TestThePath(unittest.TestCase):
     def test_ssh_command_still_carries_the_script(self):
         """The payload is built in one place; ssh_command only wraps it.
 
-        Asserted so the extraction cannot drift into a second, stale copy — and for both
+        Asserted so the extraction cannot drift into a second, stale copy - and for both
         shapes, since the switch shape is the one with something to forget.
         """
         import shlex
@@ -137,7 +137,7 @@ class TestThePath(unittest.TestCase):
             self.assertIn(shlex.quote(pretool._remote_script("ls", "sess-1", housekeeping)), cmd)
 
 
-# ── what the far shell actually does with it ───────────────────────────────────
+# -- what the far shell actually does with it -----------------------------------
 
 
 class TestOnTheFarSide(unittest.TestCase):
@@ -147,7 +147,7 @@ class TestOnTheFarSide(unittest.TestCase):
             self.assertTrue(os.path.isdir(h.dir()))
 
     def test_the_directory_is_private(self):
-        """The file is a trail of where someone works — world-readable in /tmp was half
+        """The file is a trail of where someone works - world-readable in /tmp was half
         the reason it moved."""
         with FakeHome() as h:
             h.run("true", "sess-mode")
@@ -186,7 +186,7 @@ class TestOnTheFarSide(unittest.TestCase):
 
     def test_a_home_with_a_space_survives(self):
         """`$HOME` is quoted at every use. A split here would put the state somewhere
-        nobody looks — and nobody would hear about it."""
+        nobody looks - and nobody would hear about it."""
         with FakeHome("ho me") as h:
             h.run("cd /usr", "sess-space")
             self.assertTrue(os.path.exists(h.state("sess-space")))
@@ -201,12 +201,12 @@ class TestOnTheFarSide(unittest.TestCase):
             self.assertEqual(h.run("exit 7", "sess-rc2", housekeeping=True).returncode, 7)
 
 
-# ── the restore has to say when it cannot land ─────────────────────────────────
+# -- the restore has to say when it cannot land ---------------------------------
 
 
 class TestTheRestoreSpeaksWhenItCannotLand(unittest.TestCase):
     """`cd REMEMBERED || cd ~` is the textbook shape of a cd whose failure nobody looks
-    at, and on the next line an arbitrary command — the caller's own, which assumes it is
+    at, and on the next line an arbitrary command - the caller's own, which assumes it is
     where it left off.
 
     A directory removed on the far side between two commands (a release swapped, a build
@@ -216,7 +216,7 @@ class TestTheRestoreSpeaksWhenItCannotLand(unittest.TestCase):
 
     The message says CANNOT BE ENTERED and offers two causes, because that is all that
     was verified: cd fails the same way on a directory that is still there but has
-    become unreachable — permissions changed, a mount fell away. "is gone" would name a
+    become unreachable - permissions changed, a mount fell away. "is gone" would name a
     cause nobody checked and send the reader looking in the wrong place.
     """
 
@@ -240,7 +240,7 @@ class TestTheRestoreSpeaksWhenItCannotLand(unittest.TestCase):
             self.assertIn("release-42-removed", out.stderr)
 
     def test_the_command_still_runs(self):
-        """Warn, do not block — the far side has no way to ask, and a session whose cache
+        """Warn, do not block - the far side has no way to ask, and a session whose cache
         was swept must not stop working."""
         with FakeHome() as h:
             self._gone(h)
@@ -299,7 +299,7 @@ class TestTheRestoreSpeaksWhenItCannotLand(unittest.TestCase):
             self.assertIn("[unset]", out.stdout)
 
 
-# ── the id comes from outside ──────────────────────────────────────────────────
+# -- the id comes from outside --------------------------------------------------
 
 
 class TestHostileSessionId(unittest.TestCase):
@@ -322,7 +322,7 @@ class TestHostileSessionId(unittest.TestCase):
             self.assertNotIn("OWNED", out.stdout + out.stderr)
 
 
-# ── the new failure the move brings with it ────────────────────────────────────
+# -- the new failure the move brings with it ------------------------------------
 
 
 class TestUnwritableHome(unittest.TestCase):
@@ -354,7 +354,7 @@ class TestUnwritableHome(unittest.TestCase):
             self.assertEqual(out.stderr, "")
 
     def test_the_switch_says_the_memory_is_lost(self):
-        """Once per `@alias` — the moment the session is orienting anyway."""
+        """Once per `@alias` - the moment the session is orienting anyway."""
         with FakeHome() as h:
             os.chmod(h.home, 0o500)
             out = h.run("true", "sess-ro", housekeeping=True)
@@ -376,7 +376,7 @@ class TestUnwritableHome(unittest.TestCase):
             self.assertEqual(out.returncode, 3)
 
 
-# ── the sweep: once per switch, never per command ──────────────────────────────
+# -- the sweep: once per switch, never per command ------------------------------
 
 
 class TestTheSweep(unittest.TestCase):
@@ -404,7 +404,7 @@ class TestTheSweep(unittest.TestCase):
             self.assertNotIn("cwd-dead", left)
 
     def test_it_touches_nothing_that_is_not_ours(self):
-        """`-maxdepth 1 -name 'cwd-*'` — a cache directory is a shared place."""
+        """`-maxdepth 1 -name 'cwd-*'` - a cache directory is a shared place."""
         with FakeHome() as h:
             os.makedirs(h.dir())
             stranger = os.path.join(h.dir(), "notes.txt")
@@ -416,7 +416,7 @@ class TestTheSweep(unittest.TestCase):
     def test_our_own_cwd_is_read_before_the_sweep(self):
         """Ordering, pinned: the restore reads the file, THEN the sweep runs. A session
         idle for over a month still lands where it left off, and its file comes back
-        fresh — the reverse order would send it home without a word."""
+        fresh - the reverse order would send it home without a word."""
         with FakeHome() as h:
             os.makedirs(h.dir())
             with open(h.state("sess-old"), "w") as f:
@@ -427,7 +427,7 @@ class TestTheSweep(unittest.TestCase):
             self.assertTrue(os.path.exists(h.state("sess-old")))
 
 
-# ── the one-shot marker, driven through the hook ───────────────────────────────
+# -- the one-shot marker, driven through the hook -------------------------------
 
 
 class HookConf:
@@ -465,7 +465,7 @@ class HookConf:
             f.write(alias)
 
     def freeze(self):
-        """A config dir nothing can be added to or removed from — a broken disk, in one call.
+        """A config dir nothing can be added to or removed from - a broken disk, in one call.
 
         The files already in it stay READABLE, which is the state that matters here: the
         marker can still be read and can no longer be spent, exactly as a full or
@@ -493,7 +493,7 @@ class TestTheSwitchMarkerLifecycle(unittest.TestCase):
     """`switched.<sid>` from birth to death, through main() and nothing hand-placed.
 
     Everything above drives the far-side script directly, with `housekeeping` passed in as an
-    argument — which proves what the marker BUYS and never that the hook writes or removes
+    argument - which proves what the marker BUYS and never that the hook writes or removes
     one. If `@alias` stopped arming it, the far side's housekeeping would go unpaid forever
     and every other test in this file would still be green.
     """
@@ -503,7 +503,7 @@ class TestTheSwitchMarkerLifecycle(unittest.TestCase):
             run_hook(c, "@h1")
             self.assertTrue(c.exists("switched.s1"))
 
-    # The spend of the marker is driven ONE place only — see
+    # The spend of the marker is driven ONE place only - see
     # TestTheHookDoesNotWarnAboutItself.test_the_sweep_is_spent_with_the_switch_marker,
     # where the note and the sweep are shown to be spent together. Two drivers for one
     # fact in one file is knowledge kept twice.
@@ -512,7 +512,7 @@ class TestTheSwitchMarkerLifecycle(unittest.TestCase):
         """`@local` used to REMOVE the marker; it now re-points it at the local side.
 
         What must not survive is the HOST's ticket: left naming @h1, it would be spent by
-        the first command of the next switch — housekeeping on a host that never armed it,
+        the first command of the next switch - housekeeping on a host that never armed it,
         and none on the one that did. That is unchanged. What is new is that the way home
         arms a ticket of its own (see tests/test_pretool_local_ticket.py), so the marker
         exists and no longer names a machine.
@@ -525,11 +525,11 @@ class TestTheSwitchMarkerLifecycle(unittest.TestCase):
             self.assertNotIn("h1", pretool.LOCAL_MARK)
 
 
-# ── the hook may not warn about a command the caller never wrote ───────────────
+# -- the hook may not warn about a command the caller never wrote ---------------
 
 
 class TestTheHookDoesNotWarnAboutItself(unittest.TestCase):
-    """The sweep is a `find … -delete` — a shape the hook's own irreversible-check reports.
+    """The sweep is a `find ... -delete` - a shape the hook's own irreversible-check reports.
 
     It must never fire on it: the check reads the command the CALLER typed, never the
     rewrite. A warning about a command nobody wrote is how a reader learns to skip the
@@ -556,7 +556,7 @@ class TestTheHookDoesNotWarnAboutItself(unittest.TestCase):
 
     def test_the_sweep_is_spent_with_the_switch_marker(self):
         """One question, two riders: the note and the sweep ride the same one-shot fact,
-        and the second command must carry neither. The marker itself is gone with them —
+        and the second command must carry neither. The marker itself is gone with them -
         this is the one place the spend is driven (see TestTheSwitchMarkerLifecycle)."""
         with HookConf() as c:
             c.route_to("h1")
@@ -569,22 +569,22 @@ class TestTheHookDoesNotWarnAboutItself(unittest.TestCase):
             self.assertFalse(c.exists("switched.s1"))
 
 
-# ── when the ticket cannot be punched ──────────────────────────────────────────
+# -- when the ticket cannot be punched ------------------------------------------
 
 
 class TestAMarkerThatCannotBeSpent(unittest.TestCase):
-    """The ticket is read but cannot be punched — a config dir that cannot delete.
+    """The ticket is read but cannot be punched - a config dir that cannot delete.
 
     Both riders used to sit on ONE boolean taken from the READ, with the removal's
     failure thrown away. So a broken config dir meant the marker never went away and
-    every command from then on was treated as the first after a switch: a `find … -delete`
+    every command from then on was treated as the first after a switch: a `find ... -delete`
     over someone ELSE's disk, several times a minute, and nobody told.
 
     They are told apart now, and each gets what it is owed:
-      · the reminder REPEATS — the moment it guards ("I forgot I had switched") lasts
+      - the reminder REPEATS - the moment it guards ("I forgot I had switched") lasts
         exactly as long as the marker stands, so the repetition is true, not wallpaper;
-      · the housekeeping does NOT run — it is bought by a spent ticket only;
-      · the failure is SAID, with the path and the reason, on every command. There is no
+      - the housekeeping does NOT run - it is bought by a spent ticket only;
+      - the failure is SAID, with the path and the reason, on every command. There is no
         once-per-X budget for it on purpose: every such budget is a file in the very
         directory that is broken.
     """
@@ -610,7 +610,7 @@ class TestAMarkerThatCannotBeSpent(unittest.TestCase):
 
     def test_the_housekeeping_does_not_ride(self):
         """The sweep is bought by a SPENT ticket. On a marker that stands it would ride
-        on this command, and on every command after it — a `find` over a foreign disk."""
+        on this command, and on every command after it - a `find` over a foreign disk."""
         with HookConf() as c:
             self._stuck(c)
             self.assertNotIn("-delete", run_hook(c, "ls")["updatedInput"]["command"])
@@ -643,7 +643,7 @@ class TestAMarkerThatCannotBeSpent(unittest.TestCase):
 
     def test_the_reminder_repeats_while_the_marker_stands(self):
         """It guards the moment a session acts on the wrong machine out of habit. While
-        the marker stands that moment has not passed — and the caller has not been told
+        the marker stands that moment has not passed - and the caller has not been told
         once, because the line that would have told them is the one that failed."""
         with HookConf() as c:
             self._stuck(c)
@@ -651,7 +651,7 @@ class TestAMarkerThatCannotBeSpent(unittest.TestCase):
             self.assertIn("first command since", run_hook(c, "ls").get("additionalContext", ""))
 
     def test_the_repeated_reminder_does_not_claim_to_be_said_once(self):
-        """A line that repeats may not promise it was said once — parentheses that lie
+        """A line that repeats may not promise it was said once - parentheses that lie
         teach the reader that all of the hook's parentheses are decoration."""
         with HookConf() as c:
             self._stuck(c)
@@ -660,7 +660,7 @@ class TestAMarkerThatCannotBeSpent(unittest.TestCase):
     def test_a_healthy_switch_says_it_once_and_does_not_complain(self):
         """The other direction, so none of the above can pass on a hook that simply
         shouts on every switch. Only the SHAPE of what a healthy switch says is pinned
-        here — the spend itself is driven above, and one fact wants one driver."""
+        here - the spend itself is driven above, and one fact wants one driver."""
         with HookConf() as c:
             c.route_to("h1")
             c.arm_switch("h1")
@@ -686,7 +686,7 @@ class TestTheTwoFactsOfTheMarker(unittest.TestCase):
             pretool.CONF = orig
 
     def test_no_marker_is_neither_armed_nor_a_complaint(self):
-        """The ordinary command — by far the common case, and it must say nothing."""
+        """The ordinary command - by far the common case, and it must say nothing."""
         with HookConf() as c:
             self.assertEqual(self._spend(c.dir), (False, "", ""))
 
@@ -713,7 +713,7 @@ class TestTheTwoFactsOfTheMarker(unittest.TestCase):
             self.assertEqual(unreadable, "", "a marker that READ fine may not be called unreadable")
 
 
-# ── what deliberately stayed behind ────────────────────────────────────────────
+# -- what deliberately stayed behind --------------------------------------------
 
 
 class TestTheSocketDidNotMove(unittest.TestCase):

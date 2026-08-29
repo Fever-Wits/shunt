@@ -1,38 +1,38 @@
 """
-Tests for shunt.pretool — `target.<sid>`, the file that says where a session is routed.
+Tests for shunt.pretool - `target.<sid>`, the file that says where a session is routed.
 
-Two defects met in the middle here. The write used `open(…, "w")`, which TRUNCATES before
+Two defects met in the middle here. The write used `open(..., "w")`, which TRUNCATES before
 it writes, so a write that died in between left a file that exists and names no host. The
-read handed exactly that back as "" — the same answer it gives for a file that was never
-created — and "" means local. A session that believed itself on a server then ran its next
+read handed exactly that back as "" - the same answer it gives for a file that was never
+created - and "" means local. A session that believed itself on a server then ran its next
 command here, silently. For a tool whose default is "run it here", every quiet fall to the
 default is a fall to the wrong machine, so the failure has to land on refusal instead.
 
-So the write goes through the config module's atomic writer — temp file, then os.replace:
-what is on disk is the whole new alias or the whole old one, never a blank — and the read
+So the write goes through the config module's atomic writer - temp file, then os.replace:
+what is on disk is the whole new alias or the whole old one, never a blank - and the read
 tells three states apart where it used to tell two:
 
-    absent            → the ordinary local session. Nothing to say, nothing to do.
-    a host name       → remote, as before.
-    present and empty → an anomaly. Say it; assume nothing.
+    absent            -> the ordinary local session. Nothing to say, nothing to do.
+    a host name       -> remote, as before.
+    present and empty -> an anomaly. Say it; assume nothing.
 
 Coverage:
   - an empty (or whitespace-only) routing file no longer runs the command here in silence
-  - and does not send it to a host either — refused means neither machine runs it
+  - and does not send it to a host either - refused means neither machine runs it
   - a MISSING file is still the ordinary local session, untouched and unremarked
   - @status answers UNKNOWN rather than the one thing it has not verified
   - @local and @<alias> keep working on a state nobody can read: they are its remedy
-  - the switch REPLACES the file instead of truncating it — a new inode, no leftovers
+  - the switch REPLACES the file instead of truncating it - a new inode, no leftovers
   - a HALF-written alias stays on the older path: it names a host that does not resolve,
     and that refusal already existed
-  - the tools that ignore @host mode do not claim a mode either — once per session
+  - the tools that ignore @host mode do not claim a mode either - once per session
   - the sentinel that carries "unreadable" never reaches a message
   - a switch that cannot be WRITTEN says so, and names the routing still in force
   - an Agent spawned into the unreadable state is warned on EVERY spawn, off the shared
     budget the file tools draw on
 
-The hook is run as the harness runs it — a subprocess fed JSON on stdin, started BY PATH
-with PYTHONPATH stripped — and SHUNT_CONF points at a temp directory, so no real config or
+The hook is run as the harness runs it - a subprocess fed JSON on stdin, started BY PATH
+with PYTHONPATH stripped - and SHUNT_CONF points at a temp directory, so no real config or
 session state is touched.
 """
 
@@ -61,7 +61,7 @@ class HookConf:
     It also carries a STUB `ssh`, because `@alias` now probes the host it switches to. No
     test may open a real connection: a suite that reaches the network is a suite whose
     speed and result depend on somebody else's router. The stub answers instantly and, by
-    default, successfully — which is what keeps every test below about the state file
+    default, successfully - which is what keeps every test below about the state file
     rather than about a host being up.
     """
 
@@ -75,7 +75,7 @@ class HookConf:
         return self
 
     def stub_ssh(self, returncode=0):
-        """The `ssh` the hook will find on PATH — see _run, which puts it there."""
+        """The `ssh` the hook will find on PATH - see _run, which puts it there."""
         path = os.path.join(self.bin, "ssh")
         with open(path, "w") as f:
             f.write("#!/bin/sh\nexit %d\n" % returncode)
@@ -123,7 +123,7 @@ def run_tool(conf, tool, tool_input=None, sid="s1"):
 
 
 def ran_instead(stdout):
-    """The command the hook put in place of the caller's — None when it said nothing.
+    """The command the hook put in place of the caller's - None when it said nothing.
 
     None is the answer that matters here: silence means the caller's own command went to
     the shell untouched, on whichever machine that happens to be.
@@ -140,7 +140,7 @@ def context_of(stdout):
     return json.loads(stdout)["hookSpecificOutput"].get("additionalContext")
 
 
-# ── the state that used to pass for "local" ────────────────────────────────────
+# -- the state that used to pass for "local" ------------------------------------
 
 
 class TestAnEmptyRoutingFileIsNotLocal(unittest.TestCase):
@@ -149,7 +149,7 @@ class TestAnEmptyRoutingFileIsNotLocal(unittest.TestCase):
             c.break_routing()
             _, out = run_bash(c, "ls -la")
             said = ran_instead(out)
-            self.assertIsNotNone(said, "the hook said nothing — which means `ls` just ran, here, quietly")
+            self.assertIsNotNone(said, "the hook said nothing - which means `ls` just ran, here, quietly")
             self.assertIn("NOT run", said)
 
     def test_whitespace_only_is_the_same_state(self):
@@ -179,7 +179,7 @@ class TestAnEmptyRoutingFileIsNotLocal(unittest.TestCase):
 
     def test_no_sentinel_leaks_into_the_message(self):
         """The unreadable state is an object; formatted into a message it would arrive as
-        `<object object at 0x…>`, which tells a reader nothing at all."""
+        `<object object at 0x...>`, which tells a reader nothing at all."""
         with HookConf() as c:
             c.break_routing()
             _, out = run_bash(c, "ls -la")
@@ -193,11 +193,11 @@ class TestAnEmptyRoutingFileIsNotLocal(unittest.TestCase):
             self.assertEqual(code, 0)
 
 
-# ── and the state that must stay silent ────────────────────────────────────────
+# -- and the state that must stay silent ----------------------------------------
 
 
 class TestTheOrdinaryLocalSessionIsUntouched(unittest.TestCase):
-    """The file is ABSENT in every session that never switched — far and away the common
+    """The file is ABSENT in every session that never switched - far and away the common
     case. A word there would ride in front of every local command ever run."""
 
     def test_no_file_no_message(self):
@@ -213,11 +213,11 @@ class TestTheOrdinaryLocalSessionIsUntouched(unittest.TestCase):
             self.assertIn("root@203.0.113.1", ran_instead(out))
 
 
-# ── @status may not answer what it has not read ────────────────────────────────
+# -- @status may not answer what it has not read --------------------------------
 
 
 class TestStatusDoesNotClaimWhatItHasNotRead(unittest.TestCase):
-    """The dangerous state is not "I do not know where I am" — that one is careful. It is
+    """The dangerous state is not "I do not know where I am" - that one is careful. It is
     the tool SAYING one thing while the truth is another."""
 
     def test_a_broken_state_answers_unknown(self):
@@ -237,10 +237,10 @@ class TestStatusDoesNotClaimWhatItHasNotRead(unittest.TestCase):
         with HookConf() as c:
             c.route_to("h1")
             _, out = run_bash(c, "@status")
-            self.assertIn("REMOTE → h1", ran_instead(out))
+            self.assertIn("REMOTE -> h1", ran_instead(out))
 
 
-# ── the way out must survive the state it fixes ────────────────────────────────
+# -- the way out must survive the state it fixes --------------------------------
 
 
 class TestTheRemedyStillWorks(unittest.TestCase):
@@ -257,7 +257,7 @@ class TestTheRemedyStillWorks(unittest.TestCase):
     def test_local_does_not_print_the_sentinel(self):
         """`@local` answers with the mode and nothing else, so the sentinel has nowhere to
         appear today. Pinned anyway: the moment this branch grows a message that names the
-        routing it left — as it should — that message would be the first place an object
+        routing it left - as it should - that message would be the first place an object
         could be rendered into text a caller reads."""
         with HookConf() as c:
             c.break_routing()
@@ -272,14 +272,14 @@ class TestTheRemedyStillWorks(unittest.TestCase):
             self.assertIn("root@203.0.113.1", ran_instead(out))
 
 
-# ── the write that could leave a blank behind ──────────────────────────────────
+# -- the write that could leave a blank behind ----------------------------------
 
 
 class TestTheSwitchReplacesInsteadOfTruncating(unittest.TestCase):
-    """The window itself cannot be opened on demand — a torn write wants the machine to
+    """The window itself cannot be opened on demand - a torn write wants the machine to
     die between two syscalls. What CAN be pinned is that the window is gone: writing in
     place keeps the file's inode, os.replace brings a new one. If the switch ever goes
-    back to `open(…, "w")`, the inode stops changing and this test says so."""
+    back to `open(..., "w")`, the inode stops changing and this test says so."""
 
     def _inode(self, c, sid="s1"):
         return os.stat(c.path("target." + sid)).st_ino
@@ -308,10 +308,10 @@ class TestTheSwitchReplacesInsteadOfTruncating(unittest.TestCase):
     def test_the_switch_still_announces_itself(self):
         with HookConf() as c:
             _, out = run_bash(c, "@h1")
-            self.assertIn("REMOTE → h1", ran_instead(out))
+            self.assertIn("REMOTE -> h1", ran_instead(out))
 
 
-# ── the neighbouring failure, which was never this one ─────────────────────────
+# -- the neighbouring failure, which was never this one -------------------------
 
 
 class TestAHalfWrittenAliasKeepsItsOwnPath(unittest.TestCase):
@@ -328,13 +328,13 @@ class TestAHalfWrittenAliasKeepsItsOwnPath(unittest.TestCase):
             self.assertNotIn("names no host", said)
 
 
-# ── the other door: the tools that never follow the mode ───────────────────────
+# -- the other door: the tools that never follow the mode -----------------------
 
 
 class TestTheOffModeToolsDoNotClaimAModeEither(unittest.TestCase):
-    """Read/Grep/… work on the local disk whatever the mode is; the warning exists so
+    """Read/Grep/... work on the local disk whatever the mode is; the warning exists so
     their output is not read as facts about a far machine. With the mode unreadable there
-    is no host to name — and naming one would be worse than saying nothing, while saying
+    is no host to name - and naming one would be worse than saying nothing, while saying
     nothing is the same silence this warning was written to end."""
 
     def test_a_file_tool_says_the_mode_cannot_be_read(self):
@@ -375,13 +375,13 @@ class TestTheOffModeToolsDoNotClaimAModeEither(unittest.TestCase):
             self.assertIn("you are on @h1", context_of(out))
 
 
-# ── the spawn that inherits a state nobody can read ────────────────────────────
+# -- the spawn that inherits a state nobody can read ----------------------------
 
 
 class TestASpawnedAgentIsWarnedIntoTheUnreadableState(unittest.TestCase):
     """The tools that ignore the mode share ONE once-per-session budget here, and `Agent`
     used to draw on it: a single Grep spent it, and every agent spawned afterwards was born
-    into silence. In the READABLE case Agent has always warned on every spawn — and the
+    into silence. In the READABLE case Agent has always warned on every spawn - and the
     unreadable state is strictly worse than a wrong disk, since the hook refuses the
     agent's bash outright while it lasts."""
 
@@ -391,7 +391,7 @@ class TestASpawnedAgentIsWarnedIntoTheUnreadableState(unittest.TestCase):
             run_tool(c, "Grep", {"pattern": "a"})  # spends the shared budget
             _, out = run_tool(c, "Agent", {"prompt": "go"})
             said = context_of(out)
-            self.assertIsNotNone(said, "the spawn was silent — the budget had been spent")
+            self.assertIsNotNone(said, "the spawn was silent - the budget had been spent")
             self.assertIn("INHERITS", said)
 
     def test_every_spawn_is_warned(self):
@@ -416,11 +416,11 @@ class TestASpawnedAgentIsWarnedIntoTheUnreadableState(unittest.TestCase):
             self.assertIsNone(context_of(out))
 
 
-# ── a switch that could not be written may not pass for one ────────────────────
+# -- a switch that could not be written may not pass for one --------------------
 
 
 class SealedConf(HookConf):
-    """A HookConf whose DIRECTORY cannot be written to — and with a SECOND host in it.
+    """A HookConf whose DIRECTORY cannot be written to - and with a SECOND host in it.
 
     The measured shape of the failure: an existing routing file stays readable and even
     writable; only NEW files cannot be created, which is exactly what the atomic writer
@@ -447,17 +447,17 @@ class SealedConf(HookConf):
 class TestAFailedSwitchIsSaidOutLoud(unittest.TestCase):
     """The switch used to `sys.exit(0)` on any write failure: no message, no rewrite. The
     caller reads nothing, believes they are on @alias, and their next command runs where
-    they were before. Making the write ATOMIC widened that case instead of closing it —
-    mkstemp needs the DIRECTORY writable, where `open(…, "w")` needed only the file."""
+    they were before. Making the write ATOMIC widened that case instead of closing it -
+    mkstemp needs the DIRECTORY writable, where `open(..., "w")` needed only the file."""
 
     def _said(self, out):
-        """What the hook put in place of the switch — silence fails HERE, by name.
+        """What the hook put in place of the switch - silence fails HERE, by name.
 
         Without this the silence reaches assertIn as a None and the run reports a broken
         test, when what it caught is the defect itself.
         """
         said = ran_instead(out)
-        self.assertIsNotNone(said, "the hook said nothing — the switch failed in silence")
+        self.assertIsNotNone(said, "the hook said nothing - the switch failed in silence")
         return said
 
     def test_the_failure_is_said(self):
@@ -514,19 +514,19 @@ class TestAFailedSwitchIsSaidOutLoud(unittest.TestCase):
 class TestTheConfigDirectoryFailsLikeTheWrite(unittest.TestCase):
     """`os.makedirs(CONF)` stood OUTSIDE the guard the write below it sits in.
 
-    Its failure was therefore not an event but a traceback — and a hook that raises is a
+    Its failure was therefore not an event but a traceback - and a hook that raises is a
     non-blocking error to the harness, which then runs the ORIGINAL line: `@web-01` went
     to bash as a command while nobody was told the switch had not happened. Same event as
     a routing file that cannot be written, one honest message and one traceback.
 
     Two departures from this file's method, both named rather than left to be noticed:
 
-    · the window is a RACE, not an open path. resolve_host() has just read
+    - the window is a RACE, not an open path. resolve_host() has just read
       CONF/shunt.toml, so the directory IS there when makedirs runs; it fails only if
       something takes it away in between (a parallel session's cleanup, a tmp reaper).
-      There is no filesystem SHAPE that reaches it — which is why the failure is
+      There is no filesystem SHAPE that reaches it - which is why the failure is
       injected rather than arranged.
-    · so this one test runs the hook IN-PROCESS. Everything else here spawns it as the
+    - so this one test runs the hook IN-PROCESS. Everything else here spawns it as the
       harness does, and should; an injected failure cannot cross that boundary.
     """
 
@@ -571,12 +571,12 @@ class TestTheConfigDirectoryFailsLikeTheWrite(unittest.TestCase):
             self.assertIn("Permission denied", self._switch_with_no_config_dir(c.dir))
 
 
-# ── the way back must survive a DIRECTORY in the routing file's place ──────────
+# -- the way back must survive a DIRECTORY in the routing file's place ----------
 
 
 class TestLocalSurvivesADirectoryInItsPlace(unittest.TestCase):
     """A directory named `target.<sid>` reads as the unreadable state, so every bash
-    command is refused — and `@local`, the one remedy for that state, could not win:
+    command is refused - and `@local`, the one remedy for that state, could not win:
     os.remove can never take a directory. The session had no way out from inside itself."""
 
     def _put_a_directory_there(self, c, full=False):
@@ -586,7 +586,7 @@ class TestLocalSurvivesADirectoryInItsPlace(unittest.TestCase):
 
     def test_it_reads_as_the_unreadable_state(self):
         """The premise of the trap, pinned: bash is refused, so `@local` is the only move
-        left — which is why it has to work."""
+        left - which is why it has to work."""
         with HookConf() as c:
             self._put_a_directory_there(c)
             _, out = run_bash(c, "ls")
@@ -601,7 +601,7 @@ class TestLocalSurvivesADirectoryInItsPlace(unittest.TestCase):
 
     def test_a_full_one_is_reported_with_the_path_to_remove_by_hand(self):
         """rmdir cannot take this one either, and that is the end of what the hook can do
-        from inside — so the message has to carry the path, or the way out is guesswork."""
+        from inside - so the message has to carry the path, or the way out is guesswork."""
         with HookConf() as c:
             self._put_a_directory_there(c, full=True)
             _, out = run_bash(c, "@local")
@@ -610,7 +610,7 @@ class TestLocalSurvivesADirectoryInItsPlace(unittest.TestCase):
             self.assertIn("target.s1", said)
 
     def test_it_claims_no_machine_it_has_not_read(self):
-        """The old text said "Session is STILL REMOTE … runs THERE" here as well — while
+        """The old text said "Session is STILL REMOTE ... runs THERE" here as well - while
         the routing is unreadable and bash is refused, not sent anywhere at all."""
         with HookConf() as c:
             self._put_a_directory_there(c, full=True)

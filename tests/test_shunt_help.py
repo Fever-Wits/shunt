@@ -1,5 +1,5 @@
 """
-Tests for shunt.cli — the self-introduction (`shunt` with no arguments).
+Tests for shunt.cli - the self-introduction (`shunt` with no arguments).
 
 Why this file exists: shunt is not an MCP server, so nothing announces it to whoever
 reaches for it. The map printed here is the tool's only way to explain itself in one
@@ -13,7 +13,7 @@ Coverage:
   - the map carries the sharpest edge: the mode covers bash only
   - an unknown subcommand still fails (exit 2) and points at the map
 
-The CLI is run as `python -m shunt` — the packaged entry point in a subprocess, which
+The CLI is run as `python -m shunt` - the packaged entry point in a subprocess, which
 is what an exit code can be read from.
 """
 
@@ -41,20 +41,20 @@ def run_cli(*args):
 
 class TestMapIsPrinted(unittest.TestCase):
     def test_no_arguments_prints_map_but_fails(self):
-        """Asking and forgetting both get the map — only the exit code separates them.
+        """Asking and forgetting both get the map - only the exit code separates them.
 
         A script that drops its subcommand must not silently "succeed"; a human staring
         at the terminal still deserves to see what the tool can do.
         """
         code, out, _ = run_cli()
         self.assertEqual(code, 2)
-        self.assertIn("I want to…", out)
+        self.assertIn("I want to...", out)
 
     def test_help_forms_all_work(self):
         for form in ("help", "-h", "--help"):
             code, out, _ = run_cli(form)
             self.assertEqual(code, 0, f"{form} did not exit 0")
-            self.assertIn("I want to…", out, f"{form} printed no map")
+            self.assertIn("I want to...", out, f"{form} printed no map")
 
     def test_map_goes_to_stdout_not_stderr(self):
         """Asking what a tool does is not an error condition."""
@@ -64,7 +64,7 @@ class TestMapIsPrinted(unittest.TestCase):
 
 
 class TestMapMatchesCode(unittest.TestCase):
-    """The map must not fall behind the code — that is the failure being prevented."""
+    """The map must not fall behind the code - that is the failure being prevented."""
 
     def test_every_subcommand_appears_in_the_map(self):
         with open(shunt_mod.__file__, encoding="utf-8") as f:
@@ -74,7 +74,7 @@ class TestMapMatchesCode(unittest.TestCase):
         self.assertEqual(missing, [], f"subcommands missing from the map: {missing}")
 
     def test_map_warns_about_the_boundary(self):
-        """The mode covering bash only is the trap that cost real work — it must be said."""
+        """The mode covering bash only is the trap that cost real work - it must be said."""
         self.assertIn("BASH ONLY", shunt_mod.MAP)
         self.assertIn("INHERITS", shunt_mod.MAP)
 

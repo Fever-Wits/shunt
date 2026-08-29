@@ -1,15 +1,15 @@
 """
-Tests for pretool.py — the local epilogue that reads ssh's own exit code.
+Tests for pretool.py - the local epilogue that reads ssh's own exit code.
 
 Everything else this hook says is written BEFORE anything runs: it builds a command and
 never sees a result. The epilogue is the one thing it can say about what came BACK, and it
-can say it because the rewritten command is the hook's own string — a line of shell after
+can say it because the rewritten command is the hook's own string - a line of shell after
 the ssh call, running locally, looking at the number ssh handed back.
 
 The number is 255, the code ssh reserves for its own failures. Read without help it is a
 verdict from the caller's own program: a session whose host went down mid-work sees
 `exit 255` out of `make`, or `grep`, or whatever they believed they were running, and goes
-looking for a bug in it. One sentence is the whole fix — the command never left.
+looking for a bug in it. One sentence is the whole fix - the command never left.
 
 Two things it must not do, and both are tested here:
 
@@ -17,10 +17,10 @@ Two things it must not do, and both are tested here:
   speaks. A guard that edits what it reports is worse than no guard.
 
   speak out of turn. This rides on EVERY remote command of every session, so any code but
-  255 must leave both streams exactly as they were — noise here is noise everywhere, and
+  255 must leave both streams exactly as they were - noise here is noise everywhere, and
   wallpaper is silent precisely when it needs to be read.
 
-⚠ The shell decides here, not the assertion: these run the epilogue through a real bash
+WARNING: The shell decides here, not the assertion: these run the epilogue through a real bash
 and read the real exit code and the real stderr. A test that only grepped the string would
 pass just as happily on shell that does not parse.
 """
@@ -68,7 +68,7 @@ class TestTransportFailureIsNamed(unittest.TestCase):
         self.assertIn("@local", err)
 
     def test_it_does_not_claim_what_it_did_not_check(self):
-        """A remote command is free to exit 255 on its own account — rare, and the hook
+        """A remote command is free to exit 255 on its own account - rare, and the hook
         may not overwrite the caller's own judgement with a certainty it does not have."""
         _, _, err = run_epilogue(255)
         self.assertIn("almost certainly", err)
@@ -79,7 +79,7 @@ class TestTransportFailureIsNamed(unittest.TestCase):
         self.assertEqual(rc, 255)
 
     def test_it_speaks_on_stderr_and_leaves_stdout_alone(self):
-        """stdout is the caller's DATA — a sentence in it lands in whatever they piped
+        """stdout is the caller's DATA - a sentence in it lands in whatever they piped
         the command into, and a guard that corrupts output is a bug wearing a hat."""
         _, out, err = run_epilogue(255)
         self.assertEqual(out, "")
@@ -105,7 +105,7 @@ class TestItRidesOnTheRealCommand(unittest.TestCase):
         self.assertIn(pretool._transport_epilogue("web-01"), cmd)
 
     def test_it_is_the_last_thing_in_the_string(self):
-        """Anything after `exit` would never run — the position is the contract."""
+        """Anything after `exit` would never run - the position is the contract."""
         cmd = pretool.ssh_command(HOST, "ls", "sess-1")
         self.assertTrue(cmd.endswith(pretool._transport_epilogue("web-01")))
 

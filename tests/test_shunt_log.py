@@ -1,8 +1,8 @@
 """
-Tests for shunt.cli — the `log` subcommand (reading the audit log back).
+Tests for shunt.cli - the `log` subcommand (reading the audit log back).
 
 The log THINKS in records: one recorded command each. `-n N` therefore counts commands,
-not physical lines — a distinction with no cost while every command was one line, and a
+not physical lines - a distinction with no cost while every command was one line, and a
 lie the moment one of them spanned several.
 
 Coverage:
@@ -13,7 +13,7 @@ Coverage:
   - the round trip: what was recorded is what comes out
   - an unreadable `-n` is refused instead of quietly answering a different question
 
-Nothing leaves the machine here — the log is written directly.
+Nothing leaves the machine here - the log is written directly.
 """
 
 import io
@@ -50,7 +50,7 @@ class TmpConf:
             f.write(text)
 
     def record(self, cmd):
-        """One command through the writing side — the shape the log really holds."""
+        """One command through the writing side - the shape the log really holds."""
         pretool.audit("sess-1", "h1", cmd, conf=self.dir)
 
 
@@ -60,7 +60,7 @@ def shown(argv):
     return out.getvalue()
 
 
-# ── what a human sees ──────────────────────────────────────────────────────────
+# -- what a human sees ----------------------------------------------------------
 
 
 class TestUnfolding(unittest.TestCase):
@@ -84,7 +84,7 @@ class TestUnfolding(unittest.TestCase):
             self.assertIn("grep '\\n' /var/log/syslog", shown([]))
 
 
-# ── counting ───────────────────────────────────────────────────────────────────
+# -- counting -------------------------------------------------------------------
 
 
 class TestNCountsRecords(unittest.TestCase):
@@ -107,8 +107,8 @@ class TestNCountsRecords(unittest.TestCase):
                 "done\n"
             )
             out = shown(["-n", "1"])
-            self.assertIn("for f in *; do", out)  # the head of the last command…
-            self.assertIn('gzip "$f"', out)  # …and all of its body
+            self.assertIn("for f in *; do", out)  # the head of the last command...
+            self.assertIn('gzip "$f"', out)  # ...and all of its body
             self.assertIn("done", out)
             self.assertNotIn("echo older", out)  # one command means one command
 
@@ -125,7 +125,7 @@ class TestNIsRefusedNotGuessed(unittest.TestCase):
     """An unreadable `-n` used to fall back to 50 in silence.
 
     Fifty records LOOK like an answer. Someone who typed `-n 5OO` (letter O) and read
-    the fifty they got can conclude a command was never sent to a server — and act on
+    the fifty they got can conclude a command was never sent to a server - and act on
     that. A log is where hard questions are brought; it may not quietly narrow one: the
     failure falls to refusal, not to a default.
     """
@@ -154,7 +154,7 @@ class TestNIsRefusedNotGuessed(unittest.TestCase):
         self.assertIn("number", err)
 
     def test_nothing_is_printed_as_if_it_were_the_answer(self):
-        """The defect was not the wrong count — it was fifty records with no word."""
+        """The defect was not the wrong count - it was fifty records with no word."""
         _, _, out = self._refused(["-n", "5OO"])
         self.assertNotIn("cmd-", out)
 

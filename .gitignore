@@ -1,4 +1,4 @@
-# secrets & runtime — never commit
+# secrets & runtime - never commit
 token
 token.*
 shunt.toml

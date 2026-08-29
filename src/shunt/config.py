@@ -1,5 +1,5 @@
 """
-shunt — config.py · the hosts, read (and written) in ONE place.
+shunt - config.py - the hosts, read (and written) in ONE place.
 
 ~/.config/shunt/shunt.toml:
 
@@ -12,12 +12,12 @@ shunt — config.py · the hosts, read (and written) in ONE place.
 
 A bare string IS the target; the inline table adds a per-host `key`, which wins over the
 top-level default. Everything a host needs lives here on purpose: an address split between
-this file and ~/.ssh/config breaks silently when only one side is edited — machines added
+this file and ~/.ssh/config breaks silently when only one side is edited - machines added
 on one side, the identity left on the other, and access is gone without a word.
 
 Legacy: with no shunt.toml the old `hosts` file (`<alias> ssh <target> [key=PATH]`) is still
 read, so an existing setup keeps working; a notice on stderr says where the new place is.
-Nothing is migrated automatically — that is the owner's move, not the tool's.
+Nothing is migrated automatically - that is the owner's move, not the tool's.
 
 Both callers (cli.py, pretool.py) pass their own conf dir: the knowledge of the FORMAT
 lives here, the knowledge of the LOCATION stays with the caller (which is also what lets
@@ -46,9 +46,9 @@ def config_path(conf_dir):
 
 
 def load_hosts(conf_dir):
-    """{alias: {'alias', 'target', 'key'}} — empty when nothing is configured.
+    """{alias: {'alias', 'target', 'key'}} - empty when nothing is configured.
 
-    Raises on a broken file (a config error must be loud — silence is what started this).
+    Raises on a broken file (a config error must be loud - silence is what started this).
     """
     path = config_path(conf_dir)
     if not path:
@@ -77,7 +77,7 @@ def audit_settings(conf_dir):
 
     The defaults say what the log IS: an archive, with trimming as a fuse rather than a
     policy. 100 MB is out of reach at any ordinary rate (measured: ~15 KB per six weeks),
-    and that is the intent — a fuse that blows regularly is a policy in disguise. Keeping
+    and that is the intent - a fuse that blows regularly is a policy in disguise. Keeping
     the history long is the whole point: the question people bring to an audit log is
     "where did we download that from, two months ago", and a short window answers it with
     silence.
@@ -102,7 +102,7 @@ def add_host(conf_dir, alias, target, key=None):
     """Write the host into shunt.toml and return the line written.
 
     Idempotent: an entry with the same alias is REPLACED, never duplicated. The rest of
-    the file — comments included — survives, because it is the owner's file, not ours.
+    the file - comments included - survives, because it is the owner's file, not ours.
     """
     os.makedirs(conf_dir, exist_ok=True)
     path = os.path.join(conf_dir, TOML_NAME)
@@ -112,7 +112,7 @@ def add_host(conf_dir, alias, target, key=None):
         return line
 
     with open(path, "rb") as f:
-        default_key = tomllib.load(f).get("key")  # raises on a broken file → we do not clobber it
+        default_key = tomllib.load(f).get("key")  # raises on a broken file -> we do not clobber it
     line = _entry_line(alias, target, key if key and key != default_key else None)
     with open(path) as f:
         lines = f.read().splitlines()
@@ -129,7 +129,7 @@ def add_host(conf_dir, alias, target, key=None):
     return line
 
 
-# ── reading ───────────────────────────────────────────────────────────────────
+# -- reading -------------------------------------------------------------------
 
 
 def _host(alias, target, key):
@@ -159,7 +159,7 @@ def _load_toml(path):
 def _load_legacy(path):
     """Old format, one host per line: `<alias> ssh <target> [key=PATH]`.
 
-    Returns (hosts, dropped) — a line in any other shape is skipped and COUNTED: ssh is
+    Returns (hosts, dropped) - a line in any other shape is skipped and COUNTED: ssh is
     the only transport, so a line that does not name it carries something that is not an
     ssh target and must not silently become a host; and a host that disappears without a
     word is exactly the silent failure this config is built against.
@@ -180,7 +180,7 @@ def _load_legacy(path):
 
 
 def _say_legacy_once(conf_dir, legacy_path, dropped=0):
-    """Where the config belongs now — said once, on STDERR.
+    """Where the config belongs now - said once, on STDERR.
 
     stdout is a protocol for both callers (the hook writes JSON there, the CLI passes
     remote output through), so a notice may never go that way.
@@ -192,30 +192,30 @@ def _say_legacy_once(conf_dir, legacy_path, dropped=0):
     new_path = os.path.join(conf_dir, TOML_NAME)
     sys.stderr.write(
         f"shunt: reading the legacy host list {legacy_path}\n"
-        f"       the new place is {new_path} (see shunt.toml.example) — nothing is migrated\n"
+        f"       the new place is {new_path} (see shunt.toml.example) - nothing is migrated\n"
         "       automatically; the legacy file keeps working until you move it\n"
     )
     if dropped:
         sys.stderr.write(
-            f"       {dropped} line(s) skipped: not in the `<alias> ssh <target>` form —\n"
+            f"       {dropped} line(s) skipped: not in the `<alias> ssh <target>` form -\n"
             "       shunt speaks ssh only\n"
         )
 
 
-# ── writing ───────────────────────────────────────────────────────────────────
+# -- writing -------------------------------------------------------------------
 
 
 def _write_atomic(path, text):
-    """Put the file in place in ONE step: temp file in the SAME directory → os.replace.
+    """Put the file in place in ONE step: temp file in the SAME directory -> os.replace.
 
     Two `shunt install` runs at once would otherwise interleave their writes and leave a
-    half config behind; whoever reads it — the hook does, before every command — must see
+    half config behind; whoever reads it - the hook does, before every command - must see
     either the whole old file or the whole new one. fsync before the rename, because
     without it a crash leaves a zero-length file where a config used to be.
 
     The boundary, on purpose: this is read-modify-write with no lock, so two simultaneous
     installs can still cost one of the two entries (run install again and it is back).
-    A LOST entry is recoverable; a TORN file is not — only the second one is guarded here.
+    A LOST entry is recoverable; a TORN file is not - only the second one is guarded here.
     """
     d = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=d, prefix="." + os.path.basename(path) + ".")
@@ -258,7 +258,7 @@ def _entry_line(alias, target, key):
 
 
 def _fresh_document(entry_line, key):
-    head = "# shunt hosts — see shunt.toml.example for the full form\n"
+    head = "# shunt hosts - see shunt.toml.example for the full form\n"
     if key:
         head += f"key = {_toml_str(key)}      # default identity for every host below\n"
     return head + "\n[hosts]\n" + entry_line + "\n"

@@ -1,14 +1,14 @@
 """
-Tests for pretool.py — housekeeping on THIS side of the wire.
+Tests for pretool.py - housekeeping on THIS side of the wire.
 
-The far side has been swept since the cwd files were born: `find … -name 'cwd-*' -mtime
+The far side has been swept since the cwd files were born: `find ... -name 'cwd-*' -mtime
 +30 -delete`, paid for once per switch. The near side never was. A session id is born and
-never dies, so `~/.config/shunt/` kept `active-host.<sid>` · `warned.<sid>` ·
+never dies, so `~/.config/shunt/` kept `active-host.<sid>` - `warned.<sid>` -
 `switched.<sid>` for every session that ever went remote, for as long as the machine lives
-— the same class of leak, already solved on one side and left standing on the other.
+- the same class of leak, already solved on one side and left standing on the other.
 
-⚠ The interesting part is what is NOT swept. `target.<sid>` is written ONCE, at the switch,
-and never touched again, so an old mtime there does not mean a dead session — it means a
+WARNING: The interesting part is what is NOT swept. `target.<sid>` is written ONCE, at the switch,
+and never touched again, so an old mtime there does not mean a dead session - it means a
 session that switched a while ago and may well still be working. Sweeping it would answer
 that session's next command with "never switched" and run it HERE: the silent fall to the
 wrong machine this whole file exists to prevent, performed by the housekeeping itself. The
@@ -18,7 +18,7 @@ notice; none of them can move a command to another machine.
 Coverage:
   - old markers go, on a switch, in both directions (`@local` and `@alias`)
   - fresh markers of live sessions stay
-  - `target.<sid>` is never swept, however old — the deliberate exception
+  - `target.<sid>` is never swept, however old - the deliberate exception
   - an ordinary command sweeps NOTHING: this rides on the rare moment, not the hot path
   - a config dir that cannot be listed costs the switch nothing
 
@@ -75,7 +75,7 @@ class HookConf:
         return path
 
     def names(self, sid="s1"):
-        """The session files left behind — never the LIVE session's own.
+        """The session files left behind - never the LIVE session's own.
 
         A switch arms its own ticket (`switched.<sid>`) and may write its own sidecar on
         the way through, so those appear in the directory by design. They are what the
@@ -85,10 +85,10 @@ class HookConf:
 
 
 def hook_env(conf_dir, **extra):
-    """The environment the harness actually gives the hook — WITHOUT PYTHONPATH.
+    """The environment the harness actually gives the hook - WITHOUT PYTHONPATH.
 
-    settings.json names pretool.py by absolute path, so `python3 …/src/shunt/pretool.py`
-    puts …/src/shunt on sys.path and never …/src. Leaving the test runner's PYTHONPATH in
+    settings.json names pretool.py by absolute path, so `python3 .../src/shunt/pretool.py`
+    puts .../src/shunt on sys.path and never .../src. Leaving the test runner's PYTHONPATH in
     place would hide exactly that: the package would import for a reason the hook cannot
     count on in the field.
     """
@@ -134,7 +134,7 @@ class TestTheSweepOnASwitch(unittest.TestCase):
 
     def test_the_routing_file_is_never_swept(self):
         """The deliberate exception. `target.<sid>` is written once and never touched, so
-        age says nothing about whether that session is alive — and taking it away would
+        age says nothing about whether that session is alive - and taking it away would
         send its next command to the local machine without a word."""
         with HookConf() as c:
             c.marker("target.dead", OLD)
@@ -157,7 +157,7 @@ class TestTheSweepOnASwitch(unittest.TestCase):
     def test_a_switch_survives_a_config_dir_it_cannot_list(self):
         """Housekeeping may never cost the switch: the routing is the point of the call."""
         with HookConf() as c:
-            os.chmod(c.dir, 0o300)  # write+execute, no read → listdir raises
+            os.chmod(c.dir, 0o300)  # write+execute, no read -> listdir raises
             try:
                 code, out = run_hook(c, "@local")
                 self.assertEqual(code, 0)

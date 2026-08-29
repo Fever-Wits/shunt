@@ -1,5 +1,5 @@
 """
-Tests for shunt.cli — the `run` subcommand (one command on a host, no session needed).
+Tests for shunt.cli - the `run` subcommand (one command on a host, no session needed).
 
 Coverage:
   - registered in the subcommand table and reachable by name
@@ -9,7 +9,7 @@ Coverage:
   - usage error when the command is missing
   - unknown host dies instead of guessing
 
-ssh is stubbed everywhere — no connection is attempted. SHUNT_CONF points at a
+ssh is stubbed everywhere - no connection is attempted. SHUNT_CONF points at a
 temp dir with two fake hosts.
 """
 
@@ -25,13 +25,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import shunt.cli as shunt_mod
 
-# ── helpers ────────────────────────────────────────────────────────────────────
+# -- helpers --------------------------------------------------------------------
 
 
 class TmpHosts:
     """Context manager: temp CONF holding one host in shunt.toml.
 
-    The legacy format keeps its own tests — tests/test_shunt_config.py.
+    The legacy format keeps its own tests - tests/test_shunt_config.py.
     """
 
     def __enter__(self):
@@ -60,7 +60,7 @@ def run_with_stubbed_ssh(argv, returncode=0):
     return seen["argv"][-1], rc
 
 
-# ── registration ───────────────────────────────────────────────────────────────
+# -- registration ---------------------------------------------------------------
 
 
 class TestRegistered(unittest.TestCase):
@@ -80,7 +80,7 @@ class TestRegistered(unittest.TestCase):
             self.assertIn(f'"{name}": cmd_', src)
 
 
-# ── quoting: the whole reason this is not a one-liner ──────────────────────────
+# -- quoting: the whole reason this is not a one-liner --------------------------
 
 
 class TestQuoting(unittest.TestCase):
@@ -102,7 +102,7 @@ class TestQuoting(unittest.TestCase):
             self.assertEqual(cmd, "hostname")
 
 
-# ── exit code and errors ───────────────────────────────────────────────────────
+# -- exit code and errors -------------------------------------------------------
 
 
 class TestExitCode(unittest.TestCase):
@@ -130,7 +130,7 @@ class TestErrors(unittest.TestCase):
     def test_legacy_line_of_an_unknown_shape_is_refused(self):
         """A legacy line that does not name ssh must not become a host.
 
-        Whatever such a line carries is not an ssh target — ssh-ing there would connect
+        Whatever such a line carries is not an ssh target - ssh-ing there would connect
         to the wrong thing quietly. The line must simply not resolve.
         """
         conf = tempfile.mkdtemp(prefix="shunt-test-legacy-")

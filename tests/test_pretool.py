@@ -1,5 +1,5 @@
 """
-Tests for shunt.pretool — pure logic only; no real SSH.
+Tests for shunt.pretool - pure logic only; no real SSH.
 Drives: resolve_host, ssh_command, REWRITE_MARKER guard,
 shunt-CLI passthrough guard, and @-switch parsing.
 """
@@ -168,7 +168,7 @@ class TestSshCommandShape(_PretoolBase):
         h = self.pt.resolve_host("myhost")
         r1 = self.pt.ssh_command(h, "ls", "sess-A")
         r2 = self.pt.ssh_command(h, "ls", "sess-B")
-        # ControlPath contains sid — must differ between sessions.
+        # ControlPath contains sid - must differ between sessions.
         self.assertIn("sess-A", r1)
         self.assertIn("sess-B", r2)
         self.assertNotIn("sess-B", r1)

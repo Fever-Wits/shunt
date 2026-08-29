@@ -1,18 +1,18 @@
 """
-Tests for shunt.edit_helper — the server-side editor by CONTENT, which writes on OTHER
+Tests for shunt.edit_helper - the server-side editor by CONTENT, which writes on OTHER
 people's machines.
 
 Why the first half exists: the helper decoded the file with `errors="replace"`, edited the
-TEXT and wrote the text back — so every byte that was not UTF-8 came back as U+FFFD, and
+TEXT and wrote the text back - so every byte that was not UTF-8 came back as U+FFFD, and
 a mixed-line-ending file was converted whole. Both were reported as `status: ok`,
 `verified: true`, with a diff that showed only the line that had been asked for. The
 answer was true about the match and false about the file.
 
 So the first thing tested here is the thing the helper is FOR: everything outside the
 match must come back byte for byte. Then the matching itself, because that is what the
-fix rewrote — an exact match, the two line-ending variants, and the refusals.
+fix rewrote - an exact match, the two line-ending variants, and the refusals.
 
-The second half drives the SHAPE of the answers — count-and-refuse (0/1/>1 matches), SHA
+The second half drives the SHAPE of the answers - count-and-refuse (0/1/>1 matches), SHA
 conflict, size guard, dry_run, the hint and the diff. A caller reads that shape to know
 what happened; it must not drift even when the matching underneath is rewritten.
 
@@ -52,7 +52,7 @@ def run_via_stdin(payload: dict) -> dict:
 
 
 class EditCase(unittest.TestCase):
-    """A temp file to edit, written and read as BYTES — the unit that matters here."""
+    """A temp file to edit, written and read as BYTES - the unit that matters here."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="shunt-test-edit-helper-")
@@ -71,7 +71,7 @@ class EditCase(unittest.TestCase):
             return f.read()
 
 
-# ── the defect: bytes outside the match must survive ───────────────────────────
+# -- the defect: bytes outside the match must survive ---------------------------
 
 
 class TestNonUtf8BytesSurvive(EditCase):
@@ -113,14 +113,14 @@ class TestNonUtf8BytesSurvive(EditCase):
         """
         path = self.make(self.ORIGINAL)
 
-        result = run_via_argv({"file": path, "old": "café comment", "new": "cafe comment", "expected": 1})
+        result = run_via_argv({"file": path, "old": "caf\u00e9 comment", "new": "cafe comment", "expected": 1})
 
         self.assertEqual(result["status"], "not_found", result)
         self.assertEqual(self.bytes_of(path), self.ORIGINAL)
 
 
 class TestMixedLineEndingsSurvive(EditCase):
-    """A file with both styles in it — the case the whole-file conversion silently ate."""
+    """A file with both styles in it - the case the whole-file conversion silently ate."""
 
     ORIGINAL = b"alpha\r\nlisten 80;\r\nbeta\ngamma\n"
 
@@ -134,7 +134,7 @@ class TestMixedLineEndingsSurvive(EditCase):
         self.assertEqual(self.bytes_of(path), b"alpha\r\nlisten 8080;\r\nbeta\ngamma\n")
 
     def test_the_matched_region_keeps_the_style_it_was_found_in(self):
-        """Matched as CRLF → written back as CRLF; the replacement is not smuggled in as LF."""
+        """Matched as CRLF -> written back as CRLF; the replacement is not smuggled in as LF."""
         path = self.make(self.ORIGINAL)
 
         run_via_argv({"file": path, "old": "alpha\nlisten 80;", "new": "alpha\nlisten 8080;", "expected": 1})
@@ -165,7 +165,7 @@ class TestMixedLineEndingsSurvive(EditCase):
         self.assertEqual(self.bytes_of(path).decode("utf-8"), after.replace("alpha\r\n", "alpha\r\n" + added[0], 1))
 
 
-# ── the matching itself (what the fix rewrote) ─────────────────────────────────
+# -- the matching itself (what the fix rewrote) ---------------------------------
 
 
 class TestMatching(EditCase):
@@ -254,7 +254,7 @@ class TestMatching(EditCase):
         self.assertEqual(self.bytes_of(path), b"# caf\xe9\nlisten 8080;\n")
 
 
-# ── the shape of the answer (what a caller reads to know what happened) ────────
+# -- the shape of the answer (what a caller reads to know what happened) --------
 
 
 class TestEditHelperNotFound(EditCase):
@@ -332,7 +332,7 @@ class TestEditHelperConflict(EditCase):
 
 
 class TestEditHelperSizeGuard(EditCase):
-    """The cap is on the PUSH direction — a file too big to hand over gets a reason."""
+    """The cap is on the PUSH direction - a file too big to hand over gets a reason."""
 
     def setUp(self):
         super().setUp()
@@ -356,9 +356,9 @@ class TestEditHelperSizeGuard(EditCase):
             os.environ.pop("SHUNT_EDIT_MAX_BYTES", None)
 
 
-# ── what happens AROUND the write, when the edit itself succeeds ───────────────
+# -- what happens AROUND the write, when the edit itself succeeds ---------------
 
-# The twin of TestWhatFailsAroundTheWriteIsSaid in tests/test_write_helper.py — the same
+# The twin of TestWhatFailsAroundTheWriteIsSaid in tests/test_write_helper.py - the same
 # two steps, the same two silences, in the helper that edits by content. Kept in both
 # places rather than shared: these files are deployed to the far machine one at a time and
 # stand alone there, and a test that covers only one of them would let the other drift.
@@ -404,13 +404,13 @@ def run_with_broken_os(payload: dict, sabotage: str) -> dict:
 
 class TestWhatFailsAroundTheEditIsSaid(EditCase):
     """**chown, swallowed.** The temp file belongs to whoever runs the helper, and
-    `os.replace` carries that owner onto the path — so a chown that fails changes the
+    `os.replace` carries that owner onto the path - so a chown that fails changes the
     file's OWNER while the edit lands perfectly. On `authorized_keys` or a unit file the
     write is not the damage, the ownership is, and `except: pass` meant nobody was told.
 
     **the directory fsync, over-reported.** It runs AFTER `os.replace`, so by the time it
     can fail the edited content already IS the file. Reported as `write failed` it told
-    the caller the edit had not been applied when it had — the one lie this helper's
+    the caller the edit had not been applied when it had - the one lie this helper's
     verify-after-write exists to make impossible.
     """
 
@@ -462,11 +462,11 @@ class TestWhatFailsAroundTheEditIsSaid(EditCase):
         self.assertEqual(self.bytes_of(path), self.ORIGINAL)
 
 
-# ── the verify itself, when IT is what fails ───────────────────────────────────
+# -- the verify itself, when IT is what fails -----------------------------------
 
 # The read-back was the one step here left bare while its twin in write_helper stood
 # guarded. The sabotage lets the FIRST read through (the helper has to find its match) and
-# breaks the second — the read-back — which is the only way to reach that line at all.
+# breaks the second - the read-back - which is the only way to reach that line at all.
 BREAK_THE_READ_BACK = """
 import builtins
 _real = builtins.open
@@ -482,7 +482,7 @@ builtins.open = _the_second_read_fails
 
 
 class TestAVerifyThatCannotReadIsStillAnAnswer(EditCase):
-    """The read-back can fail on its own — a permission changed between the write and the
+    """The read-back can fail on its own - a permission changed between the write and the
     check, an I/O error, the path swapped for a directory.
 
     Bare, it took the helper down with a traceback where its answer belongs, and the caller
@@ -513,7 +513,7 @@ class TestAVerifyThatCannotReadIsStillAnAnswer(EditCase):
 
     def test_unproven_is_not_the_same_word_as_wrong(self):
         """`verify mismatch` says the write is proven WRONG; this one says it is UNPROVEN,
-        and a caller acts differently on each. new_sha is null because there is none — not
+        and a caller acts differently on each. new_sha is null because there is none - not
         a hash of something nobody read."""
         path = self.make(self.ORIGINAL)
         result = run_with_broken_os(self._payload(path), BREAK_THE_READ_BACK)
@@ -523,7 +523,7 @@ class TestAVerifyThatCannotReadIsStillAnAnswer(EditCase):
 
     def test_the_edit_landed_and_the_answer_still_says_where(self):
         """os.replace already happened. The answer keeps the facts that were established
-        before the read-back — which file, how many matches — because they are true."""
+        before the read-back - which file, how many matches - because they are true."""
         path = self.make(self.ORIGINAL)
         result = run_with_broken_os(self._payload(path), BREAK_THE_READ_BACK)
         self.assertEqual(self.bytes_of(path), self.EDITED)
@@ -541,3 +541,87 @@ class TestAVerifyThatCannotReadIsStillAnAnswer(EditCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# -- a request the caller malformed ---------------------------------------------
+
+
+class TestAMalformedRequestIsAnAnswer(EditCase):
+    """`shunt edit --stdin` takes JSON from the CALLER, so a number where a string belongs
+    is ordinary input, not a bug of ours. Each of these used to raise OUTSIDE any try and
+    leave a traceback on the far machine - the one answer this file has no shape for.
+
+    Not a stricter schema, just the fields read under one guard: what the helper already
+    promised for a bad payload (`bad request: ...`) now covers the fields too.
+    """
+
+    def _file(self):
+        path = os.path.join(self.tmpdir, "f.txt")
+        with open(path, "wb") as f:
+            f.write(b"alpha\n")
+        return path
+
+    def test_a_non_numeric_expected(self):
+        r = run_via_argv({"file": self._file(), "old": "alpha", "new": "A", "expected": "abc"})
+        self.assertEqual(r["status"], "error")
+        self.assertIn("bad request", r["message"])
+
+    def test_a_file_that_is_not_a_string(self):
+        r = run_via_argv({"file": 7, "old": "alpha", "new": "A"})
+        self.assertEqual(r["status"], "error")
+        self.assertIn("bad request", r["message"])
+
+    def test_an_old_that_is_not_a_string(self):
+        r = run_via_argv({"file": self._file(), "old": ["alpha"], "new": "A"})
+        self.assertEqual(r["status"], "error")
+        self.assertIn("bad request", r["message"])
+
+    def test_the_message_names_the_field(self):
+        """`old and new must be strings` is the diagnosis; an AttributeError deep inside
+        `.encode` is a symptom the reader has to trace back."""
+        r = run_via_argv({"file": self._file(), "old": "alpha", "new": 3})
+        self.assertIn("strings", r["message"])
+
+    def test_nothing_reaches_stderr(self):
+        b64 = base64.b64encode(json.dumps({"file": 7, "old": "a", "new": "b"}).encode()).decode()
+        proc = subprocess.run([PYTHON, EDIT_HELPER, b64], capture_output=True)
+        self.assertEqual(proc.stderr, b"", "a traceback reached stderr")
+
+    def test_a_well_formed_request_is_untouched(self):
+        path = self._file()
+        r = run_via_argv({"file": path, "old": "alpha", "new": "A", "expected": 1})
+        self.assertEqual(r["status"], "ok")
+
+    def test_a_base_sha_that_is_not_a_string(self):
+        """The dangerous half of this guard: these two fail into a WRONG ANSWER, not a
+        traceback. `base_sha: 7` is truthy and unequal to any digest, so the optimistic
+        lock answered `conflict` - the helper telling its caller somebody else had edited
+        the file, having verified nothing of the kind."""
+        path = self._file()
+        r = run_via_argv({"file": path, "old": "alpha", "new": "A", "base_sha": 7})
+        self.assertEqual(r["status"], "error")
+        self.assertIn("base_sha", r["message"])
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"alpha\n")
+
+    def test_a_falsy_dry_run_does_not_become_a_write(self):
+        """`dry_run: {}` is FALSY - a caller asking for a preview got a real write."""
+        path = self._file()
+        r = run_via_argv({"file": path, "old": "alpha", "new": "A", "dry_run": {}})
+        self.assertEqual(r["status"], "error")
+        self.assertIn("dry_run", r["message"])
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"alpha\n", "the file was written on a refused request")
+
+    def test_a_truthy_dry_run_does_not_become_a_preview(self):
+        """The mirror: `dry_run: "false"` is TRUTHY, so a caller asking for a write got a
+        preview and believed the file had changed."""
+        r = run_via_argv({"file": self._file(), "old": "alpha", "new": "A", "dry_run": "false"})
+        self.assertEqual(r["status"], "error")
+        self.assertIn("dry_run", r["message"])
+
+    def test_a_null_base_sha_is_still_allowed(self):
+        """null means "skip the check" and is the ordinary shape - the guard may not take
+        it away."""
+        r = run_via_argv({"file": self._file(), "old": "alpha", "new": "A", "base_sha": None})
+        self.assertEqual(r["status"], "ok")

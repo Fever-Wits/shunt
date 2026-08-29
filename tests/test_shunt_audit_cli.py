@@ -1,9 +1,9 @@
 """
-Tests for shunt.cli — the CLI writes to the same audit log as the hook.
+Tests for shunt.cli - the CLI writes to the same audit log as the hook.
 
 Why this file exists: the hook recorded every redirected bash command while the CLI
-recorded nothing, so `run` · `edit` · `cp` · `bg` · `get` · `commit` left this machine
-without a trace — and `run` is the path we recommend to agents, which made the
+recorded nothing, so `run` - `edit` - `cp` - `bg` - `get` - `commit` left this machine
+without a trace - and `run` is the path we recommend to agents, which made the
 recommended path the unaudited one.
 
 Coverage:
@@ -16,7 +16,7 @@ Coverage:
   - the record lands in the CLI's config dir, not in the hook's
   - a log that cannot be written does not break the subcommand
 
-ssh/rsync are stubbed everywhere — no connection is attempted.
+ssh/rsync are stubbed everywhere - no connection is attempted.
 """
 
 import hashlib
@@ -70,7 +70,7 @@ def stub_ssh(returncode=0, stdout=b"", stderr=b""):
     )
 
 
-# ── the six subcommands that reach a host ──────────────────────────────────────
+# -- the six subcommands that reach a host --------------------------------------
 
 
 class TestEachSubcommandIsRecorded(unittest.TestCase):
@@ -90,7 +90,7 @@ class TestEachSubcommandIsRecorded(unittest.TestCase):
             self.assertIn("[edit] /etc/nginx.conf", c.lines()[0])
 
     def test_edit_says_when_it_was_only_a_preview(self):
-        """A dry run touched nothing — the log must not suggest otherwise."""
+        """A dry run touched nothing - the log must not suggest otherwise."""
         with TmpConf() as c:
             with stub_ssh():
                 shunt_mod.cmd_edit(["@h1", "/etc/nginx.conf", "OLD", "NEW", "--dry-run"])
@@ -106,7 +106,7 @@ class TestEachSubcommandIsRecorded(unittest.TestCase):
     def test_bg_start_is_recorded_with_the_boundaries_kept(self):
         """The quotes ARE the record: `make -j8 all` arrived as ONE argument, and the log
         now says so. It used to be assembled with ` `.join, which re-split every argument
-        that carried a space — so `shunt bg @h "rm -rf /var/lib/My App"` was logged as two
+        that carried a space - so `shunt bg @h "rm -rf /var/lib/My App"` was logged as two
         paths, neither of them the one that was typed, on the hand that runs with nobody
         watching. The command itself has always been assembled with shlex.join; the witness
         now quotes the way the executor quotes."""
@@ -128,7 +128,7 @@ class TestEachSubcommandIsRecorded(unittest.TestCase):
             self.assertEqual(shlex.split(logged), argv)
 
     def test_bg_stop_is_recorded(self):
-        """Stopping a job changes the far machine too — one line for every shape of bg."""
+        """Stopping a job changes the far machine too - one line for every shape of bg."""
         with TmpConf() as c:
             with stub_ssh():
                 shunt_mod.cmd_bg(["@h1", "--stop", "shunt-nightly"])
@@ -154,7 +154,7 @@ class TestEachSubcommandIsRecorded(unittest.TestCase):
 
             def fake_run(cmd, **kwargs):
                 calls["n"] += 1
-                if calls["n"] == 1:  # sha256sum — no conflict
+                if calls["n"] == 1:  # sha256sum - no conflict
                     return MagicMock(returncode=0, stderr=b"", stdout=(sha + "  /remote/file.py\n").encode())
                 return MagicMock(returncode=0, stderr=b"", stdout=json.dumps({"status": "ok", "new_sha": sha}).encode())
 
@@ -166,11 +166,11 @@ class TestEachSubcommandIsRecorded(unittest.TestCase):
             self.assertIn("[commit] /remote/file.py", c.lines()[0])
 
 
-# ── what stays out ─────────────────────────────────────────────────────────────
+# -- what stays out -------------------------------------------------------------
 
 
 class TestReadOnlyStaysOut(unittest.TestCase):
-    """The log answers "what left this machine" — a read brings something back."""
+    """The log answers "what left this machine" - a read brings something back."""
 
     def test_read_is_not_recorded(self):
         with TmpConf() as c:
@@ -179,7 +179,7 @@ class TestReadOnlyStaysOut(unittest.TestCase):
             self.assertEqual(c.lines(), [])
 
 
-# ── the shape of the record ────────────────────────────────────────────────────
+# -- the shape of the record ----------------------------------------------------
 
 
 class TestRecordShape(unittest.TestCase):
@@ -212,13 +212,13 @@ class TestRecordShape(unittest.TestCase):
             self.assertIn("sid=cli host=h1 :: [run] uptime", shown)
 
 
-# ── the seam with the hook ─────────────────────────────────────────────────────
+# -- the seam with the hook -----------------------------------------------------
 
 
 class TestLocationStaysWithTheCaller(unittest.TestCase):
     """The hook's audit() is shared; the config dir is passed, never assumed.
 
-    Otherwise the CLI would write wherever the hook module happened to point — which in
+    Otherwise the CLI would write wherever the hook module happened to point - which in
     a test is the real log of whoever is running the tests.
     """
 
@@ -241,7 +241,7 @@ class TestFailureIsSilent(unittest.TestCase):
     def test_an_unwritable_log_does_not_break_the_subcommand(self):
         """Auditing must never be the reason a command fails."""
         with TmpConf() as c:
-            os.mkdir(c.log)  # a directory where the log belongs → the append fails
+            os.mkdir(c.log)  # a directory where the log belongs -> the append fails
             with stub_ssh(returncode=7):
                 rc = shunt_mod.cmd_run(["@h1", "false"])
             self.assertEqual(rc, 7)  # the command ran, and its exit code came back

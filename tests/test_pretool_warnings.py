@@ -1,18 +1,18 @@
 """
-Tests for shunt.pretool — the PreToolUse hook, end-to-end (JSON in → JSON out).
+Tests for shunt.pretool - the PreToolUse hook, end-to-end (JSON in -> JSON out).
 
 Coverage:
   - Bash rewriting is UNCHANGED by the warning branch (regression guard)
   - @status / @local switches still work
-  - Agent spawned in remote mode → warned, every time (each spawn inherits the mode)
-  - file AND search tools in remote mode → warned once per host, then quiet
-  - the single warning carries both remedies (remote file · remote search), because
+  - Agent spawned in remote mode -> warned, every time (each spawn inherits the mode)
+  - file AND search tools in remote mode -> warned once per host, then quiet
+  - the single warning carries both remedies (remote file - remote search), because
     the budget is shared: Grep is called often enough to turn a per-call line into
     wallpaper
   - switching host re-arms the file-tool warning
   - the irreversible warning does not fire on a redirect to /dev/null, and still does
-    on a redirect to a file — the idiom must not turn the line into wallpaper
-  - @local clears it, so entering remote mode again warns again — and SAYS SO, with the
+    on a redirect to a file - the idiom must not turn the line into wallpaper
+  - @local clears it, so entering remote mode again warns again - and SAYS SO, with the
     path and the reason, when that one removal fails (a silent failure here costs the
     next remote session its only warning)
   - nothing is warned about while local
@@ -21,7 +21,7 @@ Coverage:
   - addition: the hook still routes over a legacy `hosts` file (the rest runs on the
     canonical shunt.toml)
 
-The hook is exercised as the harness runs it — a subprocess fed JSON on stdin —
+The hook is exercised as the harness runs it - a subprocess fed JSON on stdin -
 because that IS its contract. Two details of that contract are reproduced on purpose:
 the hook is started BY PATH, and PYTHONPATH is stripped, because settings.json wires it
 in by absolute path and nothing puts the package on sys.path for it. SHUNT_CONF points
@@ -44,7 +44,7 @@ import shunt.pretool as pretool_mod
 PRETOOL = pretool_mod.__file__
 
 
-# ── helpers ────────────────────────────────────────────────────────────────────
+# -- helpers --------------------------------------------------------------------
 
 
 class TmpConf:
@@ -79,10 +79,10 @@ class TmpConf:
 
 
 def hook_env(conf_dir=None):
-    """The environment the harness actually gives the hook — WITHOUT PYTHONPATH.
+    """The environment the harness actually gives the hook - WITHOUT PYTHONPATH.
 
-    settings.json names pretool.py by absolute path, so `python3 …/src/shunt/pretool.py`
-    puts …/src/shunt on sys.path and never …/src. Leaving the test runner's PYTHONPATH in
+    settings.json names pretool.py by absolute path, so `python3 .../src/shunt/pretool.py`
+    puts .../src/shunt on sys.path and never .../src. Leaving the test runner's PYTHONPATH in
     place would hide exactly that: the package would import for a reason the hook cannot
     count on in the field.
     """
@@ -122,11 +122,11 @@ def rewritten_command(stdout):
         return None
 
 
-# ── regression: the Bash path must be untouched ────────────────────────────────
+# -- regression: the Bash path must be untouched --------------------------------
 
 
 class TestBashUnchanged(unittest.TestCase):
-    """The warning branch sits in FRONT of the Bash path — prove it stays out of it."""
+    """The warning branch sits in FRONT of the Bash path - prove it stays out of it."""
 
     def test_local_bash_is_not_rewritten(self):
         with TmpConf() as c:
@@ -163,7 +163,7 @@ class TestBashUnchanged(unittest.TestCase):
             self.assertIn("REMOTE", rewritten_command(out))
 
 
-# ── the agent warning (problem 1: silent inheritance) ──────────────────────────
+# -- the agent warning (problem 1: silent inheritance) --------------------------
 
 
 class TestAgentWarning(unittest.TestCase):
@@ -183,7 +183,7 @@ class TestAgentWarning(unittest.TestCase):
             self.assertIsNone(context_of(out))
 
     def test_agent_warned_every_time(self):
-        """Each spawn inherits the mode — a once-per-session warning would miss spawns."""
+        """Each spawn inherits the mode - a once-per-session warning would miss spawns."""
         with TmpConf() as c:
             c.route_to("h1")
             run_hook(c, "Agent", {"prompt": "one"})
@@ -191,7 +191,7 @@ class TestAgentWarning(unittest.TestCase):
             self.assertIsNotNone(context_of(out))
 
 
-# ── the file-tool warning (problem 3: mode covers bash only) ───────────────────
+# -- the file-tool warning (problem 3: mode covers bash only) -------------------
 
 
 class TestFileToolWarning(unittest.TestCase):
@@ -223,7 +223,7 @@ class TestFileToolWarning(unittest.TestCase):
             self.assertIn("shunt run", ctx)  # the remedy for a remote search
 
     def test_search_and_file_tools_share_one_warning_per_host(self):
-        """A line per Grep call would become wallpaper — and wallpaper is never read."""
+        """A line per Grep call would become wallpaper - and wallpaper is never read."""
         with TmpConf() as c:
             c.route_to("h1")
             _, first = run_hook(c, "Grep", {"pattern": "a"})
@@ -243,7 +243,7 @@ class TestFileToolWarning(unittest.TestCase):
             self.assertIn("shunt run", ctx)
 
     def test_second_read_is_quiet(self):
-        """Once per host — a warning on every read would become wallpaper."""
+        """Once per host - a warning on every read would become wallpaper."""
         with TmpConf() as c:
             c.route_to("h1")
             run_hook(c, "Read", {"file_path": "/a"})
@@ -251,7 +251,7 @@ class TestFileToolWarning(unittest.TestCase):
             self.assertIsNone(context_of(out))
 
     def test_switching_host_warns_again(self):
-        """The old warning described a different machine — it no longer applies."""
+        """The old warning described a different machine - it no longer applies."""
         with TmpConf() as c:
             c.route_to("h1")
             run_hook(c, "Read", {"file_path": "/a"})
@@ -285,7 +285,7 @@ class TestFileToolWarning(unittest.TestCase):
             self.assertIsNotNone(context_of(out))
 
 
-# ── @local: when the forgetting itself fails ───────────────────────────────────
+# -- @local: when the forgetting itself fails -----------------------------------
 
 
 class TestGoingLocalSaysWhenItCannotForget(unittest.TestCase):
@@ -293,7 +293,7 @@ class TestGoingLocalSaysWhenItCannotForget(unittest.TestCase):
 
     When that removal fails the loss is silent AND it lands far from here: the session
     goes back to @h1 later, the marker still names it, _warned_before answers "already
-    told" — and Read/Grep read the LOCAL disk with nobody saying a word. That is the
+    told" - and Read/Grep read the LOCAL disk with nobody saying a word. That is the
     exact silence the warning exists to end, restored by a file nobody could delete.
 
     So it is said, with the PATH and the REASON: "cannot delete" is a broken disk or
@@ -303,7 +303,7 @@ class TestGoingLocalSaysWhenItCannotForget(unittest.TestCase):
     def _stuck_warned(self, c, sid="s1"):
         """A `warned.<sid>` that cannot be removed.
 
-        A directory in its place — the shape _clear_routing already documents for the
+        A directory in its place - the shape _clear_routing already documents for the
         routing file (a torn write, a stray mkdir, a filesystem that lost its mind), and
         the one that fails the removal without also breaking the routing file's own.
         Non-empty, so no rmdir could quietly save the day either.
@@ -313,7 +313,7 @@ class TestGoingLocalSaysWhenItCannotForget(unittest.TestCase):
         open(os.path.join(path, "in-the-way"), "w").close()
 
     def _go_local(self, c):
-        """What the caller reads back from `@local` — the hook replaces it with an echo."""
+        """What the caller reads back from `@local` - the hook replaces it with an echo."""
         _, out = run_hook(c, "Bash", {"command": "@local"})
         return rewritten_command(out) or ""
 
@@ -328,14 +328,14 @@ class TestGoingLocalSaysWhenItCannotForget(unittest.TestCase):
 
     def test_it_says_what_the_session_loses(self):
         """A path and an errno tell an operator WHERE; this tells them what breaks if
-        they leave it — the next remote entry going unwarned."""
+        they leave it - the next remote entry going unwarned."""
         with TmpConf() as c:
             c.route_to("h1")
             self._stuck_warned(c)
             self.assertIn("LOCAL disk", self._go_local(c))
 
     def test_the_mode_line_survives_the_complaint(self):
-        """The session really did go local, and that is the more urgent of the two facts —
+        """The session really did go local, and that is the more urgent of the two facts -
         the complaint rides with it instead of replacing it."""
         with TmpConf() as c:
             c.route_to("h1")
@@ -355,13 +355,13 @@ class TestGoingLocalSaysWhenItCannotForget(unittest.TestCase):
             self.assertFalse(c.exists("warned.s1"))
 
 
-# ── the irreversible warning: the idiom vs the real thing ──────────────────────
+# -- the irreversible warning: the idiom vs the real thing ----------------------
 
 
 class TestARedirectToDevNullIsNotDestruction(unittest.TestCase):
     """`2>/dev/null` throws a message away; it truncates nothing.
 
-    The `>`-detector used to fire on it — and that redirect is the commonest shape in an
+    The `>`-detector used to fire on it - and that redirect is the commonest shape in an
     agent's bash, carried by the hook's own remote script too. So the loudest line the
     hook has ("cannot be taken back") arrived on ordinary commands, which is exactly the
     wallpaper the two-narrow-cases rule above IRREVERSIBLE exists to prevent: a line that
@@ -373,13 +373,13 @@ class TestARedirectToDevNullIsNotDestruction(unittest.TestCase):
     """
 
     def warning_for(self, command):
-        """What the hook says before `command` leaves for @h1 — "" when it says nothing."""
+        """What the hook says before `command` leaves for @h1 - "" when it says nothing."""
         with TmpConf() as c:
             c.route_to("h1")
             _, out = run_hook(c, "Bash", {"command": command})
             return context_of(out) or ""
 
-    # the idiom — silent
+    # the idiom - silent
     def test_stderr_to_dev_null_is_silent(self):
         self.assertNotIn("truncates", self.warning_for("cat /etc/hosts 2>/dev/null"))
 
@@ -396,14 +396,14 @@ class TestARedirectToDevNullIsNotDestruction(unittest.TestCase):
         self.assertNotIn("truncates", self.warning_for("ls -la &>/dev/null"))
 
     def test_a_stream_moved_onto_another_is_silent(self):
-        """`2>&1` never pointed at a file — it was already excluded, and stays so."""
+        """`2>&1` never pointed at a file - it was already excluded, and stays so."""
         self.assertNotIn("truncates", self.warning_for("grep -r x . 2>&1 | head"))
 
     def test_an_appending_redirect_beside_the_idiom_is_silent(self):
         """`>>` adds; the `2>/dev/null` next to it must not speak for it."""
         self.assertNotIn("truncates", self.warning_for("echo x >> /var/log/x 2>/dev/null"))
 
-    # the real thing — still loud
+    # the real thing - still loud
     def test_a_redirect_to_a_file_still_warns(self):
         self.assertIn("truncates", self.warning_for("ls -la > /tmp/listing"))
 
@@ -422,7 +422,7 @@ class TestARedirectToDevNullIsNotDestruction(unittest.TestCase):
         self.assertNotIn("truncates", warning)
 
 
-# ── the word after the flag: what `sudo -u www` used to hide ───────────────────
+# -- the word after the flag: what `sudo -u www` used to hide -------------------
 
 
 class WarnerCase(unittest.TestCase):
@@ -451,7 +451,7 @@ class WarnerCase(unittest.TestCase):
 class TestAFlagDoesNotEatTheCommand(WarnerCase):
     """`sudo -u www rm -rf /srv/x` said NOTHING.
 
-    The scan steps over the words that stand in front of a command — `sudo`, then anything
+    The scan steps over the words that stand in front of a command - `sudo`, then anything
     starting with `-`. It stepped over `-u` and then took `www`, the flag's VALUE, for the
     command; the rm two words later was never looked at. The loudest line the hook has was
     silent on the shape that most often carries a destructive command: one run as another
@@ -459,7 +459,7 @@ class TestAFlagDoesNotEatTheCommand(WarnerCase):
 
     Both directions, because half of this is proving the skip did not go too far: a word
     skipped is a word never examined, so a flag wrongly taught to eat one would HIDE a
-    warning — the one direction a check that never blocks may not fail in.
+    warning - the one direction a check that never blocks may not fail in.
     """
 
     def test_sudo_u_no_longer_hides_the_command(self):
@@ -497,31 +497,31 @@ class TestAFlagDoesNotEatTheCommand(WarnerCase):
         self.assertWarnsAbout("sudo -h %s -rf /srv/x" % self.RM, self.RM)
 
     def test_env_stayed_out_of_the_table_on_purpose(self):
-        """`env -S` takes a COMMAND as its value — skipping it would skip the answer."""
+        """`env -S` takes a COMMAND as its value - skipping it would skip the answer."""
         self.assertWarnsAbout("env -S '%s -rf /srv/x'" % self.RM, self.RM)
 
     def test_a_commands_own_flags_are_not_value_eaters(self):
         """The table belongs to the PREFIXES that stand in FRONT of a command. A command's
-        own options are none of its business — `find … -delete` must still speak, and this
+        own options are none of its business - `find ... -delete` must still speak, and this
         is the regression guard for that (it passed before the change, and has to after)."""
         self.assertWarnsAbout("find /srv -name x -delete", "-delete")
 
 
-# ── the false alarm that stays, and why ────────────────────────────────────────
+# -- the false alarm that stays, and why ----------------------------------------
 
 
 class TestTheFalseAlarmThatStays(WarnerCase):
     """`echo "a > b"` warns about a redirect that is only text. Kept, on purpose.
 
-    These pin a DECISION rather than a fix — they pass on the code that came before, and
+    These pin a DECISION rather than a fix - they pass on the code that came before, and
     that is the point: the next reader who sets out to silence the quoted `>` has to walk
     past them, and the reason is right here.
 
     Blanking out the quoted regions before the `>` scan is clean, cheap and confined. It
-    was refused because quoted text is not always inert: `ssh host "… > log"`, `bash -c`,
+    was refused because quoted text is not always inert: `ssh host "... > log"`, `bash -c`,
     `su -c` hand the quoted region to another interpreter, where that `>` truncates a real
     file. Silencing the noise silences those too, and telling them apart needs a list of
-    every command that takes code as a string — the parser weight this check exists to
+    every command that takes code as a string - the parser weight this check exists to
     avoid, wrong the day someone adds the next entry. Noise is the survivable direction.
     """
 
@@ -535,13 +535,13 @@ class TestTheFalseAlarmThatStays(WarnerCase):
         self.assertIn(self.RM, said)
 
     def test_the_command_scan_reads_the_raw_text_and_keeps_reading_it(self):
-        """A separator inside quotes opens a phantom segment — which can only ADD a
+        """A separator inside quotes opens a phantom segment - which can only ADD a
         warning. Nothing done about the `>` may reach this scan: blanking quotes here
-        would turn `echo "; rm …"` from a false alarm into a silence."""
+        would turn `echo "; rm ..."` from a false alarm into a silence."""
         self.assertWarnsAbout('echo "; %s -rf /srv/x"' % self.RM, self.RM)
 
 
-# ── boundaries ─────────────────────────────────────────────────────────────────
+# -- boundaries -----------------------------------------------------------------
 
 
 class TestBoundaries(unittest.TestCase):
@@ -553,7 +553,7 @@ class TestBoundaries(unittest.TestCase):
             self.assertIsNone(context_of(out))
 
     def test_warning_never_blocks(self):
-        """exit 2 would deny the call — these are notes, not gates."""
+        """exit 2 would deny the call - these are notes, not gates."""
         with TmpConf() as c:
             c.route_to("h1")
             for tool in ("Agent", "Read", "Write"):
@@ -561,12 +561,12 @@ class TestBoundaries(unittest.TestCase):
                 self.assertEqual(code, 0, f"{tool} did not exit 0")
 
     def test_garbage_stdin_does_not_crash(self):
-        """It refuses ON PURPOSE — which is not the same as falling over.
+        """It refuses ON PURPOSE - which is not the same as falling over.
 
         This test used to assert exit 0, and in doing so it held the defect in place: exit
         0 on an unreadable input let the harness run the ORIGINAL command, and on a routed
         session that runs it on the wrong machine. What "does not crash" has to mean here
-        is a decision and a sentence, not a traceback — so both are asserted. The policy
+        is a decision and a sentence, not a traceback - so both are asserted. The policy
         itself, in all three of its branches, lives in tests/test_pretool_hook_input.py.
         """
         r = subprocess.run([sys.executable, PRETOOL], input=b"not json", capture_output=True, env=hook_env())
@@ -575,7 +575,7 @@ class TestBoundaries(unittest.TestCase):
         self.assertIn("[shunt]", r.stderr.decode())
 
 
-# ── ADDITION: the legacy `hosts` file, walked through the HOOK ─────────────────
+# -- ADDITION: the legacy `hosts` file, walked through the HOOK -----------------
 
 
 class LegacyConf(TmpConf):

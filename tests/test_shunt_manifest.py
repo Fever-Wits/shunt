@@ -1,5 +1,5 @@
 """
-Tests for shunt.cli — manifest logic and subcommand registry.
+Tests for shunt.cli - manifest logic and subcommand registry.
 
 Coverage:
   - _manifest_load / _manifest_save round-trip
@@ -8,7 +8,7 @@ Coverage:
     a bare traceback
   - _checkout_local_path computation
   - _sha256_file
-  - cmd_checkout manifest side-effects (subprocess.run stubbed → no real ssh)
+  - cmd_checkout manifest side-effects (subprocess.run stubbed -> no real ssh)
   - cmd_checkout --list output
   - cmd_checkout --abandon
   - cmd_commit --abandon
@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import shunt.cli as shunt_mod
 
-# ── helpers ────────────────────────────────────────────────────────────────────
+# -- helpers --------------------------------------------------------------------
 
 
 def sha256(b: bytes) -> str:
@@ -64,7 +64,7 @@ class TmpConf:
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
 
-# ── AC-3a: import smoke ────────────────────────────────────────────────────────
+# -- AC-3a: import smoke --------------------------------------------------------
 
 
 class TestImportSmoke(unittest.TestCase):
@@ -89,7 +89,7 @@ class TestImportSmoke(unittest.TestCase):
         self.assertTrue(callable(shunt_mod._sha256_file))
 
 
-# ── AC-3b: fns dict ────────────────────────────────────────────────────────────
+# -- AC-3b: fns dict ------------------------------------------------------------
 
 
 class TestFnsDict(unittest.TestCase):
@@ -111,7 +111,7 @@ class TestFnsDict(unittest.TestCase):
     def test_main_lists_checkout_commit_in_map(self):
         """main() with no args prints the map, and the map includes checkout and commit.
 
-        No arguments is the tool's self-introduction (the map on stdout — shunt is not
+        No arguments is the tool's self-introduction (the map on stdout - shunt is not
         an MCP server and this is its only way to explain itself in one call) AND a
         missing subcommand (exit 2). Whatever it prints must name every subcommand.
         See tests/test_shunt_help.py.
@@ -154,7 +154,7 @@ class TestFnsDict(unittest.TestCase):
                 mock_fn.assert_called_once()
 
 
-# ── Manifest helpers ────────────────────────────────────────────────────────────
+# -- Manifest helpers ------------------------------------------------------------
 
 
 class TestManifestHelpers(unittest.TestCase):
@@ -180,18 +180,18 @@ class TestManifestHelpers(unittest.TestCase):
             self.assertTrue(os.path.exists(shunt_mod.MANIFEST))
 
     def test_save_is_atomic(self):
-        """save writes via .tmp then os.replace — no partial file visible."""
+        """save writes via .tmp then os.replace - no partial file visible."""
         with TmpConf():
             shunt_mod._manifest_save({"a": "1"})
             # tmp file must not exist after save
             tmp_path = shunt_mod.MANIFEST + ".tmp"
             self.assertFalse(os.path.exists(tmp_path))
 
-    # ── a manifest that cannot be read is not an empty one ─────────────────────
+    # -- a manifest that cannot be read is not an empty one ---------------------
     # This block replaces test_corrupt_manifest_returns_empty, which asserted the
     # opposite and so froze the defect in place: a corrupt manifest came back as {},
     # and {} MEANS "nothing is checked out" to everything downstream. The worst of it
-    # was not the wrong answer but the repair — a `checkout` run to recover saved the
+    # was not the wrong answer but the repair - a `checkout` run to recover saved the
     # file back with one entry and took every other base_sha with it.
 
     def _write_manifest(self, text):
@@ -219,12 +219,12 @@ class TestManifestHelpers(unittest.TestCase):
 
     def test_corrupt_manifest_is_not_overwritten_by_a_checkout(self):
         """The recovery attempt was the destructive step: `checkout` loaded {},
-        added its own entry and saved — every other checkout's base_sha gone.
+        added its own entry and saved - every other checkout's base_sha gone.
 
         And the SECOND victim, which the first version of this fix still lost: the
         manifest used to be read AFTER `os.replace(part, local)`, so a refusal arrived
         with the pull already moved into place. A re-checkout over an edited file
-        destroyed exactly the work the refusal then said it had left alone — the gate
+        destroyed exactly the work the refusal then said it had left alone - the gate
         is worth nothing behind the write it is meant to gate.
 
         ssh is stubbed to SUCCEED, so a pull that reaches the save would perform it;
@@ -267,7 +267,7 @@ class TestManifestHelpers(unittest.TestCase):
             self.assertFalse(os.path.exists(local + ".part"))
 
     def test_the_refusal_tells_the_truth_about_the_local_files(self):
-        """The message says the local files stay where they are. It has to be true —
+        """The message says the local files stay where they are. It has to be true -
         a refusal that misdescribes what it did is worse than one that says nothing."""
         with TmpConf():
             self._corrupt()
@@ -283,14 +283,14 @@ class TestManifestHelpers(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 shunt_mod.cmd_commit([])
 
-    # ── a manifest that PARSES is not yet a manifest ───────────────────────────
+    # -- a manifest that PARSES is not yet a manifest ---------------------------
     # The refusal above only ever asked whether json.load raised. `null` does not: it
-    # parses cleanly to None, which is FALSY — so it walked straight past the guard and
+    # parses cleanly to None, which is FALSY - so it walked straight past the guard and
     # into "no checkouts in manifest", exit 0, while edited files sat unpushed. Word for
     # word the answer the refusal exists to prevent, arriving through the door left open.
     # `[]` takes that same falsy path. A non-empty list or a string takes the other one
-    # and reaches `m.keys()` as a bare AttributeError. Both classes are the same fact —
-    # this is not a mapping of checkouts — so both fall to the same refusal.
+    # and reaches `m.keys()` as a bare AttributeError. Both classes are the same fact -
+    # this is not a mapping of checkouts - so both fall to the same refusal.
 
     NOT_AN_OBJECT = ("null", "[]", '["/some/local/path.py"]', '"a string"', "42")
 
@@ -302,7 +302,7 @@ class TestManifestHelpers(unittest.TestCase):
                     shunt_mod._manifest_load()
 
     def test_the_refusal_names_the_file_and_what_it_found(self):
-        """The same actionable refusal as the unreadable one — plus the reason, because
+        """The same actionable refusal as the unreadable one - plus the reason, because
         "cannot read" over a file that is plainly readable would send the reader hunting
         for a permissions problem that is not there."""
         with TmpConf():
@@ -327,7 +327,7 @@ class TestManifestHelpers(unittest.TestCase):
                 shunt_mod.cmd_checkout(["--list"])
 
     def test_a_list_manifest_refuses_instead_of_raising(self):
-        """`["…"]` used to reach `m.items()` and print a traceback. A refusal says what
+        """`["..."]` used to reach `m.items()` and print a traceback. A refusal says what
         is wrong with the file; a traceback says what is wrong with our code."""
         with TmpConf():
             self._write_manifest('["/some/local/path.py"]')
@@ -335,8 +335,8 @@ class TestManifestHelpers(unittest.TestCase):
                 shunt_mod.cmd_checkout(["--list"])
 
     def test_an_empty_object_is_still_the_ordinary_empty_state(self):
-        """The line the type check must not cross: `{}` is a real, legitimate manifest —
-        every checkout abandoned — and stays the quiet answer it always was."""
+        """The line the type check must not cross: `{}` is a real, legitimate manifest -
+        every checkout abandoned - and stays the quiet answer it always was."""
         with TmpConf():
             self._write_manifest("{}")
             self.assertEqual(shunt_mod._manifest_load(), {})
@@ -360,7 +360,7 @@ class TestManifestHelpers(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_checkout_local_path_absolute_remote(self):
-        """Absolute remote path → local path strips leading slash."""
+        """Absolute remote path -> local path strips leading slash."""
         with TmpConf() as conf:
             result = shunt_mod._checkout_local_path("myhost", "/home/user/file.py")
             expected = os.path.join(conf, "checkouts", "myhost", "home", "user", "file.py")
@@ -380,7 +380,7 @@ class TestManifestHelpers(unittest.TestCase):
         self.assertNotEqual(p1, p2)
 
 
-# ── cmd_checkout --list ────────────────────────────────────────────────────────
+# -- cmd_checkout --list --------------------------------------------------------
 
 
 class TestCheckoutList(unittest.TestCase):
@@ -438,7 +438,7 @@ class TestCheckoutList(unittest.TestCase):
             )
 
 
-# ── cmd_checkout --abandon ─────────────────────────────────────────────────────
+# -- cmd_checkout --abandon -----------------------------------------------------
 
 
 class TestCheckoutAbandon(unittest.TestCase):
@@ -483,12 +483,12 @@ class TestCheckoutAbandon(unittest.TestCase):
             self.assertEqual(rc, 1)
 
     def test_abandon_missing_arg_dies(self):
-        """--abandon without a path calls die() → SystemExit."""
+        """--abandon without a path calls die() -> SystemExit."""
         with TmpConf(), self.assertRaises(SystemExit):
             shunt_mod.cmd_checkout(["--abandon"])
 
 
-# ── cmd_checkout (main pull path, ssh stubbed) ─────────────────────────────────
+# -- cmd_checkout (main pull path, ssh stubbed) ---------------------------------
 
 
 class TestCheckoutPull(unittest.TestCase):
@@ -505,7 +505,7 @@ class TestCheckoutPull(unittest.TestCase):
         def fake_run(cmd, **kwargs):
             # cmd_checkout opens the local file for writing and passes the fd to
             # subprocess.run via stdout=open(local,"wb").  The real subprocess writes
-            # into it; our stub must do the same — write through the fd then return.
+            # into it; our stub must do the same - write through the fd then return.
             stdout = kwargs.get("stdout")
             if stdout is not None and hasattr(stdout, "write"):
                 stdout.write(file_content)
@@ -588,10 +588,10 @@ class TestCheckoutPull(unittest.TestCase):
             self.assertFalse(os.path.exists(local + ".part"))
 
     def test_failed_recheckout_keeps_the_edited_local_file(self):
-        """The expensive one: checkout → edit for forty minutes → checkout again → ssh dies.
+        """The expensive one: checkout -> edit for forty minutes -> checkout again -> ssh dies.
 
         The pull used to open the local file for writing, which truncates it the moment
-        the process starts — before ssh has said a word — and then unlinked it when ssh
+        the process starts - before ssh has said a word - and then unlinked it when ssh
         failed. The work was gone, and the command that destroyed it was the one asked to
         REFRESH it. The remedy is the atomic pattern the rest of the tree already uses:
         write beside the target, move into place only on success.
@@ -688,17 +688,17 @@ class TestCheckoutPull(unittest.TestCase):
             self.assertEqual(disk_content, file_content_v2)
 
 
-# ── a re-checkout over local edits ─────────────────────────────────────────────
+# -- a re-checkout over local edits ---------------------------------------------
 
 
 class TestCheckoutRefusesToOverwriteLocalEdits(unittest.TestCase):
     """The sibling of `test_failed_recheckout_keeps_the_edited_local_file`, and the case
     that one does NOT cover: there, ssh dies and the atomic pull leaves the work alone.
-    Here everything WORKS — and a successful pull replaced the edits with the remote copy,
+    Here everything WORKS - and a successful pull replaced the edits with the remote copy,
     silently, with no undo and no second copy anywhere.
 
     It was reachable by following the tool's own advice: `commit` on a file whose remote
-    had moved printed "re-checkout to pick up remote changes, then re-apply your edits" —
+    had moved printed "re-checkout to pick up remote changes, then re-apply your edits" -
     and the re-checkout destroyed the edits it was telling you to re-apply.
 
     The gate sits where the manifest read already sits, BEFORE anything is written, and it
@@ -766,7 +766,7 @@ class TestCheckoutRefusesToOverwriteLocalEdits(unittest.TestCase):
             self.assertIn("refusing to overwrite local edits", err)
 
     def test_the_file_is_untouched(self):
-        """The whole point. Not "restored afterwards" — never written at all."""
+        """The whole point. Not "restored afterwards" - never written at all."""
         with TmpConf() as conf:
             local = self._checked_out(conf)
             self._checkout(["@myhost", "/remote/file.py"])
@@ -775,7 +775,7 @@ class TestCheckoutRefusesToOverwriteLocalEdits(unittest.TestCase):
             self.assertFalse(os.path.exists(local + ".part"))
 
     def test_it_refuses_before_touching_the_network(self):
-        """A gate placed after the pull is not a gate — the same lesson the manifest read
+        """A gate placed after the pull is not a gate - the same lesson the manifest read
         learned one step earlier in this command."""
         with TmpConf() as conf:
             self._checked_out(conf)
@@ -789,7 +789,7 @@ class TestCheckoutRefusesToOverwriteLocalEdits(unittest.TestCase):
             self.assertEqual(shunt_mod._manifest_load()[local]["base_sha"], "the_first_pull")
 
     def test_it_names_every_way_out(self):
-        """A refusal with no door is a wall. Keep and push · keep and stop tracking · drop."""
+        """A refusal with no door is a wall. Keep and push - keep and stop tracking - drop."""
         with TmpConf() as conf:
             self._checked_out(conf)
             _, err, _, _ = self._checkout(["@myhost", "/remote/file.py"])
@@ -806,7 +806,7 @@ class TestCheckoutRefusesToOverwriteLocalEdits(unittest.TestCase):
             self.assertIn(sha256(self.EDITED), err)
             self.assertIn(local, err)
 
-    # ── and the three shapes that must NOT be refused ─────────────────────────
+    # -- and the three shapes that must NOT be refused -------------------------
 
     def test_force_takes_the_remote_copy(self):
         with TmpConf() as conf:
@@ -819,7 +819,7 @@ class TestCheckoutRefusesToOverwriteLocalEdits(unittest.TestCase):
             self.assertEqual(shunt_mod._manifest_load()[local]["base_sha"], sha256(b"the remote copy\n"))
 
     def test_an_untouched_checkout_still_refreshes(self):
-        """Nothing is lost by replacing a copy identical to what was pulled — refusing
+        """Nothing is lost by replacing a copy identical to what was pulled - refusing
         here would break the ordinary "get the latest" without protecting anything."""
         with TmpConf() as conf:
             untouched = b"exactly what was pulled\n"
@@ -842,7 +842,7 @@ class TestCheckoutRefusesToOverwriteLocalEdits(unittest.TestCase):
             self.assertTrue(os.path.exists(local))
 
     def test_a_file_that_was_never_checked_out_is_pulled(self):
-        """No manifest entry, no base_sha, nothing to compare — a first checkout."""
+        """No manifest entry, no base_sha, nothing to compare - a first checkout."""
         with TmpConf() as conf:
             self._make_hosts(conf)
             code, _, _, ssh_called = self._checkout(["@myhost", "/remote/file.py"])
@@ -850,7 +850,7 @@ class TestCheckoutRefusesToOverwriteLocalEdits(unittest.TestCase):
             self.assertTrue(ssh_called)
 
 
-# ── cmd_commit --abandon ───────────────────────────────────────────────────────
+# -- cmd_commit --abandon -------------------------------------------------------
 
 
 class TestCommitAbandon(unittest.TestCase):
@@ -890,7 +890,7 @@ class TestCommitAbandon(unittest.TestCase):
             shunt_mod.cmd_commit(["--abandon"])
 
 
-# ── cmd_commit — push path (ssh stubbed) ──────────────────────────────────────
+# -- cmd_commit - push path (ssh stubbed) --------------------------------------
 
 
 class TestCommitPush(unittest.TestCase):
@@ -947,7 +947,7 @@ class TestCommitPush(unittest.TestCase):
 
     def test_commit_skips_unknown_host_and_keeps_going(self):
         """A manifest entry can outlive its host. One stale entry must not abandon the
-        files after it — commit reports it, sets a non-zero code, and carries on."""
+        files after it - commit reports it, sets a non-zero code, and carries on."""
         with TmpConf() as conf:
             _, base_sha = self._setup_conf(conf, b"content\n")
 
@@ -992,7 +992,7 @@ class TestCommitPush(unittest.TestCase):
             m = MagicMock()
             call_count["n"] += 1
             if call_count["n"] == 1:
-                # sha256sum returns a DIFFERENT sha → conflict
+                # sha256sum returns a DIFFERENT sha -> conflict
                 m.returncode = 0
                 m.stdout = ("f" * 64 + "  /remote/file.py\n").encode()
                 m.stderr = b""
@@ -1043,7 +1043,7 @@ class TestCommitPush(unittest.TestCase):
             self.assertEqual(rc, 0)
 
     def test_commit_file_not_in_manifest_dies(self):
-        """Specifying a local_path not in manifest → die() → SystemExit.
+        """Specifying a local_path not in manifest -> die() -> SystemExit.
 
         The manifest must be non-empty, otherwise cmd_commit's early-return
         ('no checkouts in manifest') fires before reaching the argv lookup.
@@ -1058,7 +1058,7 @@ class TestCommitPush(unittest.TestCase):
             self.assertNotEqual(ctx.exception.code, 0)
 
     def test_commit_empty_manifest_returns_zero(self):
-        """No checkouts in manifest → prints message, returns 0."""
+        """No checkouts in manifest -> prints message, returns 0."""
         with TmpConf():
             with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
                 rc = shunt_mod.cmd_commit([])
@@ -1066,7 +1066,7 @@ class TestCommitPush(unittest.TestCase):
             self.assertIn("no checkouts", mock_out.getvalue())
 
     def test_commit_write_helper_conflict_response(self):
-        """write_helper returning conflict → CONFLICT printed, manifest unchanged."""
+        """write_helper returning conflict -> CONFLICT printed, manifest unchanged."""
         local_content = b"my edits\n"
 
         call_count = {"n": 0}
@@ -1075,7 +1075,7 @@ class TestCommitPush(unittest.TestCase):
             m = MagicMock()
             call_count["n"] += 1
             if call_count["n"] == 1:
-                # sha256sum matches → no pre-push conflict
+                # sha256sum matches -> no pre-push conflict
                 m.returncode = 0
                 m.stdout = (sha256(local_content) + "  /remote/file.py\n").encode()
                 m.stderr = b""
@@ -1107,7 +1107,7 @@ class TestCommitPush(unittest.TestCase):
             self.assertEqual(m[local]["base_sha"], base_sha)
 
     def test_commit_write_helper_error_response(self):
-        """write_helper returning error → ERROR printed, rc non-zero."""
+        """write_helper returning error -> ERROR printed, rc non-zero."""
         local_content = b"edits\n"
 
         call_count = {"n": 0}
@@ -1190,20 +1190,20 @@ class TestCommitPush(unittest.TestCase):
 
     def test_a_helper_warning_reaches_the_caller(self):
         """`shunt edit` prints the helper's JSON verbatim, so its warnings show for free.
-        This path PARSES the JSON, and anything it does not print is dropped on the floor —
+        This path PARSES the JSON, and anything it does not print is dropped on the floor -
         the same silence the helper was just taught not to keep, one layer up. The case is
         real: a chown that could not follow means the file changed OWNER, which is the
         whole of the damage on an authorized_keys.
         """
         _, out, _ = self._commit_with_helper_warnings(
-            ["chown to 0:0 failed (Operation not permitted) — the file now belongs to 1000:1000 instead"]
+            ["chown to 0:0 failed (Operation not permitted) - the file now belongs to 1000:1000 instead"]
         )
         self.assertIn("chown", out)
         self.assertIn("belongs to", out)
 
     def test_the_write_still_counts_as_done(self):
         """It is a warning, not a verdict. Turning a landed write into a non-zero exit is
-        the very bug the fsync half of this fixed, pointing the other way — and base_sha
+        the very bug the fsync half of this fixed, pointing the other way - and base_sha
         must move, or the next commit invents a conflict."""
         local_content = b"edited content\n"
         rc, out, base_sha = self._commit_with_helper_warnings(["fsync of the directory /etc failed (I/O error)"])
@@ -1214,18 +1214,18 @@ class TestCommitPush(unittest.TestCase):
     def test_a_clean_push_prints_no_warning_line(self):
         rc, out, _ = self._commit_with_helper_warnings([])
         self.assertEqual(rc, 0)
-        self.assertNotIn("⚠", out)
+        self.assertNotIn("⚠", out)  # the warning glyph the product emits
 
 
-# ── when the helper never got to answer ────────────────────────────────────────
+# -- when the helper never got to answer ----------------------------------------
 
 
 class TestTheHelperCrashIsReadable(unittest.TestCase):
-    """`ERROR … unexpected response: ` — and nothing else. That was the whole report.
+    """`ERROR ... unexpected response: ` - and nothing else. That was the whole report.
 
     The far side is driven with `capture_output=True`, but only STDOUT was ever read. If
-    the helper never got to answer — no python3 over there, the process killed, a
-    permission that stopped it at the first import — stdout is empty and everything that
+    the helper never got to answer - no python3 over there, the process killed, a
+    permission that stopped it at the first import - stdout is empty and everything that
     says WHY is in stderr and in the exit code. Both went on the floor, and the caller was
     left with a message that names the failure without naming a cause.
 
@@ -1279,7 +1279,7 @@ class TestTheHelperCrashIsReadable(unittest.TestCase):
         self.assertIn("nothing on stdout", out)
 
     def test_a_partial_answer_is_still_shown(self):
-        """Whatever DID arrive is evidence — it says how far the helper got."""
+        """Whatever DID arrive is evidence - it says how far the helper got."""
         _, out = self._commit_with(0, b"{not json", b"")
         self.assertIn("{not json", out)
 

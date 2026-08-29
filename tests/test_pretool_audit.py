@@ -1,20 +1,20 @@
 """
-Tests for shunt.pretool — the audit log and its trimming.
+Tests for shunt.pretool - the audit log and its trimming.
 
 The design in one line: the log is an ARCHIVE and trimming is a FUSE. Size is the
-trigger; age is only the unit in which room gets freed. A long history is the point —
+trigger; age is only the unit in which room gets freed. A long history is the point -
 the question people bring to an audit log is "where did we download that from, two
 months ago", and a short window answers it with silence.
 
 Coverage:
-  - a redirected command is recorded (time · session · host · command)
+  - a redirected command is recorded (time - session - host - command)
   - ONE record is ONE line: a multi-line command is folded on the way in and comes back
     whole; a command cannot forge a record of its own
   - old history is KEPT while the log is under the ceiling (the fuse is not a policy)
-  - over the ceiling, the OLDEST months go — the rest of the history stays
+  - over the ceiling, the OLDEST months go - the rest of the history stays
   - over the ceiling with only recent lines, size cuts in as the last resort
     (without it the fuse fails in exactly the case it exists for)
-  - a line without a readable date does not stop the trimming — for good, silently
+  - a line without a readable date does not stop the trimming - for good, silently
   - a log INHERITED from before folding: its multi-line records are trimmed whole, and a
     size cut leaves a dated line at the front (or age-trimming would be dead for good)
   - trim_at_mb / drop_months come from shunt.toml; bad or missing values fall back
@@ -37,7 +37,7 @@ from shunt import pretool
 
 
 def days_ago(n):
-    """ISO date n days back — the shape the log lines carry."""
+    """ISO date n days back - the shape the log lines carry."""
     return time.strftime("%Y-%m-%d", time.localtime(time.time() - n * 86400))
 
 
@@ -62,7 +62,7 @@ class TmpConf:
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def write_lines(self, specs):
-        """specs = [(days_ago, marker, count), …] — oldest first."""
+        """specs = [(days_ago, marker, count), ...] - oldest first."""
         with open(self.log, "w") as f:
             for age, marker, count in specs:
                 f.writelines(f"{days_ago(age)}T12:00:00 sid=s host=h :: {marker}-{i}\n" for i in range(count))
@@ -72,7 +72,7 @@ class TmpConf:
             return f.read()
 
 
-# ── recording ──────────────────────────────────────────────────────────────────
+# -- recording ------------------------------------------------------------------
 
 
 class TestRecords(unittest.TestCase):
@@ -94,13 +94,13 @@ class TestRecords(unittest.TestCase):
             pretool.CONF = orig
 
 
-# ── one record = one line ──────────────────────────────────────────────────────
+# -- one record = one line ------------------------------------------------------
 
 
 class TestOneRecordOneLine(unittest.TestCase):
     """The unit the log is counted and trimmed in must survive a multi-line command.
 
-    Written raw, its newlines made the file hold more lines than it held commands — and
+    Written raw, its newlines made the file hold more lines than it held commands - and
     every reader of the log counts lines: the trimmer dates a cut from the head of one.
     """
 
@@ -144,8 +144,35 @@ class TestOneRecordOneLine(unittest.TestCase):
     def test_an_unknown_escape_from_an_older_log_is_left_alone(self):
         self.assertEqual(pretool.unescape_cmd("grep -P '\\t' file"), "grep -P '\\t' file")
 
+    def test_the_session_id_cannot_split_the_line_either(self):
+        """The command was the field anybody thought of. `sid` arrives in the harness'
+        JSON and reaches the line just as raw, so it breaks the same equality."""
+        with TmpConf() as c:
+            pretool.audit("sess\n2020-01-01T00:00:00 sid=x host=y :: rm -rf /", "h", "ls")
+            with open(c.log) as f:
+                self.assertEqual(len(f.readlines()), 1)
 
-# ── the archive: age alone never triggers anything ─────────────────────────────
+    def test_the_alias_cannot_split_the_line_either(self):
+        """An alias is a TOML key, and _toml_key lets it be a quoted string - so it can
+        carry a newline the same way."""
+        with TmpConf() as c:
+            pretool.audit("s", "web\n01", "ls")
+            with open(c.log) as f:
+                self.assertEqual(len(f.readlines()), 1)
+
+    def test_folding_a_non_string_does_not_swallow_the_record(self):
+        """The fold calls .replace, so a non-str would raise INSIDE audit's catch-all and
+        take the whole entry with it - the one outcome a fire-and-forget audit line may
+        not have. `%s` first, then fold: `host=None` is a poor record, no record is worse.
+        Nothing sends a non-str today; the guard is for the day something does.
+        """
+        with TmpConf() as c:
+            pretool.audit("s", None, "ls")
+            self.assertIn("host=None", c.body())
+            self.assertIn(":: ls", c.body())
+
+
+# -- the archive: age alone never triggers anything -----------------------------
 
 
 class TestArchiveIsKept(unittest.TestCase):
@@ -169,19 +196,19 @@ class TestArchiveIsKept(unittest.TestCase):
             self.assertEqual(c.body().count("ancient"), 50)
 
 
-# ── the fuse: size triggers, age frees ─────────────────────────────────────────
+# -- the fuse: size triggers, age frees -----------------------------------------
 
 
 class TestFuse(unittest.TestCase):
     TINY = "[audit]\ntrim_at_mb = 0.02\ndrop_months = 2\n"  # 20 KB ceiling
 
     def test_oldest_months_go_first(self):
-        """Five years in the file → the first two months leave, the rest stays."""
+        """Five years in the file -> the first two months leave, the rest stays."""
         with TmpConf(self.TINY) as c:
             c.write_lines(
                 [
-                    (400, "ancient", 300),  # oldest — inside the 2-month cut
-                    (330, "middle", 300),  # 70 days later — survives
+                    (400, "ancient", 300),  # oldest - inside the 2-month cut
+                    (330, "middle", 300),  # 70 days later - survives
                     (1, "recent", 300),
                 ]
             )
@@ -201,12 +228,27 @@ class TestFuse(unittest.TestCase):
             self.assertLessEqual(os.path.getsize(c.log), 21_000)
             self.assertIn("the-newest", c.body())  # the newest line survives
 
+    def test_one_record_over_the_ceiling_does_not_empty_the_log(self):
+        """The size cut walks back from the end while records still FIT. A single record
+        bigger than the whole ceiling ends that walk before its first turn, and the slice
+        it leaves is empty - the fuse wiping the file it protects, newest record and all.
 
-# ── a damaged line must not disarm the fuse ────────────────────────────────────
+        Called directly: audit() would need a ceiling this small in shunt.toml, and the
+        point is the arithmetic, not the config.
+        """
+        with TmpConf() as c:
+            with open(c.log, "w") as f:
+                f.write("%sT12:00:00 sid=s host=h :: %s\n" % (days_ago(1), "x" * 500))
+            pretool._trim_audit(c.log, 2, 100)  # one 500-byte record, 100-byte ceiling
+            self.assertGreater(os.path.getsize(c.log), 0, "the fuse emptied the log")
+            self.assertIn("sid=s", c.body())
+
+
+# -- a damaged line must not disarm the fuse ------------------------------------
 
 
 class TestDamagedFirstLine(unittest.TestCase):
-    """The oldest line dates the cut — so one unreadable line used to end all trimming.
+    """The oldest line dates the cut - so one unreadable line used to end all trimming.
 
     The exception was swallowed by audit() (a log line may never break the command it
     records), which is what made the failure total AND silent: the log grew past its
@@ -237,7 +279,7 @@ class TestDamagedFirstLine(unittest.TestCase):
             self.assertNotIn("torn line", c.body())
 
     def test_trimming_does_not_raise_on_it(self):
-        """Called directly — audit() would have hidden the exception."""
+        """Called directly - audit() would have hidden the exception."""
         with TmpConf() as c:
             with open(c.log, "w") as f:
                 f.write("torn line with no date\n")
@@ -249,14 +291,14 @@ class TestDamagedFirstLine(unittest.TestCase):
         self.assertIsNone(pretool._cut_date("", 2))
 
 
-# ── an inherited log: records written before folding existed ───────────────────
+# -- an inherited log: records written before folding existed -------------------
 
 
 class TestInheritedLog(unittest.TestCase):
     """Logs written before commands were folded hold records spread over many lines.
 
     Only the first of those lines carries a date, and the old trimmer compared every
-    line's first ten characters with the cutoff — a coin toss on the rest: a continuation
+    line's first ten characters with the cutoff - a coin toss on the rest: a continuation
     starting with a space fell out (" " < "2"), one starting with a letter stayed
     ("p" > "2"). A kept, recent command lost part of its body and the survivors passed
     for records of their own.
@@ -268,27 +310,27 @@ class TestInheritedLog(unittest.TestCase):
 
     RECENT = (
         f"{days_ago(1)}T12:00:00 sid=s host=h :: for f in *.log; do\n",
-        '    gzip "$f"\n',  # a space at the front — used to fall
+        '    gzip "$f"\n',  # a space at the front - used to fall
         "done\n",
-    )  # a letter at the front — used to stay
+    )  # a letter at the front - used to stay
 
     def test_a_kept_command_does_not_lose_its_body(self):
         with TmpConf(TestFuse.TINY) as c:
-            c.write_lines([(400, "ancient", 500)])  # oldest — dates the cut, then goes
+            c.write_lines([(400, "ancient", 500)])  # oldest - dates the cut, then goes
             with open(c.log, "a") as f:
                 f.writelines(self.RECENT)
             self.assertGreater(os.path.getsize(c.log), 20_000)
             pretool.audit("s", "h", "trigger")
             body = c.body()
             self.assertNotIn("ancient", body)  # the oldest window went, as before
-            self.assertIn('gzip "$f"', body)  # …and the recent command is whole
+            self.assertIn('gzip "$f"', body)  # ...and the recent command is whole
             self.assertIn("done", body)
 
     def test_a_size_cut_leaves_a_dated_line_at_the_front(self):
-        """Otherwise the next trim cannot date its cut — age-trimming dead for good."""
+        """Otherwise the next trim cannot date its cut - age-trimming dead for good."""
         with TmpConf(TestFuse.TINY) as c:
             with open(c.log, "w") as f:
-                for i in range(200):  # all recent → only size can free
+                for i in range(200):  # all recent -> only size can free
                     f.write(f"{days_ago(1)}T12:00:00 sid=s host=h :: block-{i:03d} line-0\n")
                     f.writelines(f"    continuation-{j}\n" for j in range(1, 4))
             self.assertGreater(os.path.getsize(c.log), 20_000)
@@ -303,7 +345,7 @@ class TestInheritedLog(unittest.TestCase):
         self.assertEqual(records, [head + "    tail-1\ntail-2\n", nxt])
 
     def test_an_orphan_fragment_is_a_record_of_its_own(self):
-        """Nothing above it to belong to — it is still shown and still counted."""
+        """Nothing above it to belong to - it is still shown and still counted."""
         cmd = "2026-08-06T12:00:00 sid=s host=h :: cmd\n"
         self.assertEqual(pretool.log_records(["    orphan\n", cmd]), ["    orphan\n", cmd])
 
@@ -312,7 +354,7 @@ class TestInheritedLog(unittest.TestCase):
         self.assertEqual(pretool._cut_date(line, 2), "2026-03-02")
 
 
-# ── settings ───────────────────────────────────────────────────────────────────
+# -- settings -------------------------------------------------------------------
 
 
 class TestSettings(unittest.TestCase):
@@ -357,7 +399,7 @@ class TestMonthArithmetic(unittest.TestCase):
         self.assertEqual(pretool._months_after("2026-05-05", 0), "2026-05-05")
 
 
-# ── mechanics of the rewrite ───────────────────────────────────────────────────
+# -- mechanics of the rewrite ---------------------------------------------------
 
 
 class TestRewriteIsClean(unittest.TestCase):

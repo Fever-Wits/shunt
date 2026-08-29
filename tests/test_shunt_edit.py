@@ -1,21 +1,21 @@
 """
-Tests for shunt.cli — `edit`, and the payload it hands to edit_helper.
+Tests for shunt.cli - `edit`, and the payload it hands to edit_helper.
 
 Why this file exists: `--dry-run` was computed only on the OLD/NEW path, so
 `shunt edit @h file --stdin --dry-run` sent a payload with no `dry_run` in it and the
-helper WROTE — on someone else's machine, with a flag on the command line asking it not
+helper WROTE - on someone else's machine, with a flag on the command line asking it not
 to. The docs offer both flags under one command, so the combination is the natural one
 to reach for.
 
 The second defect in the same command was the EXIT CODE: the helper answers in JSON and
-always exits 0 — `not_found` and `ambiguous` included — and cmd_edit passed ssh's code
-straight back. So `shunt edit … && deploy` deployed a file that had not been edited.
+always exits 0 - `not_found` and `ambiguous` included - and cmd_edit passed ssh's code
+straight back. So `shunt edit ... && deploy` deployed a file that had not been edited.
 
 Coverage:
   - --stdin + --dry-run does not write (the real helper runs against a temp file)
   - the control: the same payload WITHOUT --dry-run does write (so the test above is
     testing the flag, not the helper's mood)
-  - the flag reaches the payload on both paths — stdin and OLD/NEW
+  - the flag reaches the payload on both paths - stdin and OLD/NEW
   - a payload that already asks for a dry run is never turned into a write
   - the file comes from the argument, not from the JSON
   - the exit code follows the helper's status, not the transport's: 0 only for `ok`
@@ -80,7 +80,7 @@ def payload_of(argv, stdin_payload=None):
 
 
 def apply_locally(payload):
-    """Hand the payload to the real edit_helper — the same run as on the far side."""
+    """Hand the payload to the real edit_helper - the same run as on the far side."""
     b64 = base64.b64encode(json.dumps(payload).encode()).decode()
     r = subprocess.run([sys.executable, HELPER, b64], capture_output=True)
     return json.loads(r.stdout.decode())
@@ -89,10 +89,10 @@ def apply_locally(payload):
 def edit_rc(argv, ssh_returncode=0):
     """cmd_edit's exit code, with ssh replaced by a LOCAL run of the real edit_helper.
 
-    The helper decides the status; the test must not invent its answers — that is the
+    The helper decides the status; the test must not invent its answers - that is the
     whole point of an exit code that follows it. Returns (rc, what_was_printed).
     """
-    real_run = subprocess.run  # bound before the patch — the stub must not call itself
+    real_run = subprocess.run  # bound before the patch - the stub must not call itself
 
     def fake_run(a, *args, **kwargs):
         r = real_run([sys.executable, HELPER, a[-1]], capture_output=True)
@@ -139,7 +139,7 @@ class TestStdinDryRun(unittest.TestCase):
 
 
 class TestExitCodeFollowsTheEdit(unittest.TestCase):
-    """`shunt edit … && deploy` must not deploy a file that was never edited."""
+    """`shunt edit ... && deploy` must not deploy a file that was never edited."""
 
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="shunt-test-edit-rc-")
@@ -171,7 +171,7 @@ class TestExitCodeFollowsTheEdit(unittest.TestCase):
         self.assertIn("ambiguous", out)
 
     def test_a_dry_run_that_found_its_match_returns_zero(self):
-        """A preview that worked is a success — it is not a refused edit."""
+        """A preview that worked is a success - it is not a refused edit."""
         with TmpHosts():
             rc, _ = edit_rc(["@h1", self.target, "listen 80;", "listen 8080;", "--dry-run"])
         self.assertEqual(rc, 0)
@@ -208,7 +208,7 @@ class TestFlagReachesThePayload(unittest.TestCase):
 
 class TestStdinPayload(unittest.TestCase):
     def test_the_file_comes_from_the_argument(self):
-        """The path is addressed on the command line — the JSON does not get to override."""
+        """The path is addressed on the command line - the JSON does not get to override."""
         with TmpHosts():
             payload = payload_of(["@h1", "/etc/right", "--stdin"], {"file": "/etc/wrong", "old": "a", "new": "b"})
         self.assertEqual(payload["file"], "/etc/right")

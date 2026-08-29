@@ -1,42 +1,42 @@
 """
-Tests for pretool.py — the ticket that speaks for the way HOME, and the state-writes
+Tests for pretool.py - the ticket that speaks for the way HOME, and the state-writes
 around it that used to fail in silence.
 
 The hook has always said a word before the first command after `@alias`: "this runs THERE,
-not here". The way back said nothing at all — `@local` cleared the marker and the next
+not here". The way back said nothing at all - `@local` cleared the marker and the next
 command ran here without comment. That asymmetry has a cost measured in a session working
 across two machines: *sometimes I forget where I am*. Forgetting is symmetric; the reminder
 was not. So the marker is no longer CLEARED by `@local`, it CHANGES SIDES: one ticket, one
-file, whichever direction the switch went, and the dance @a → @b → local → @c carries a
+file, whichever direction the switch went, and the dance @a -> @b -> local -> @c carries a
 word at every step instead of at every second one.
 
 That is one behaviour. The rest of this file is the class of defect it uncovered on the way:
 every state-write around the ticket that answered a broken config dir with `pass`. Each of
-them is quiet in a way that lands far from its cause —
+them is quiet in a way that lands far from its cause -
 
-  arming on `@alias` — no reminder, and no once-per-switch housekeeping on the far side at
+  arming on `@alias` - no reminder, and no once-per-switch housekeeping on the far side at
       all: the sweep never runs, and the probe that says "this session cannot remember its
       working directory" never speaks. The session then works for hours with a cwd that is
       silently not being written.
-  READING the marker — a directory in its place used to read as "not armed", so the ticket
+  READING the marker - a directory in its place used to read as "not armed", so the ticket
       could never be spent: no reminder, ever, and no housekeeping, ever, with nothing
-      anywhere saying why. Unreadable is now a state of its OWN — not absent (which is
+      anywhere saying why. Unreadable is now a state of its OWN - not absent (which is
       silence) and not armed (which would have the hook claim a switch it never read, and
       buy the far side's housekeeping with it).
-  the active-host sidecar on `@local` — nothing in the hook reads that file, which is
+  the active-host sidecar on `@local` - nothing in the hook reads that file, which is
       exactly why its failure must be said: it is written for the OUTSIDE, and a stale one
       tells a reader this session is on @h1 while it is home.
 
 Coverage:
   - the first command after `@local` says it runs HERE; the second says nothing
   - a session that never switched hears nothing, ever (the common case, and the point)
-  - the note rides ALONG with the command — nothing local is rewritten
+  - the note rides ALONG with the command - nothing local is rewritten
   - `@local` arms the ticket instead of removing it, and no host can spend it
   - the last switch wins in both directions
   - each of the three silent writes above, said with the path and the reason
   - and the other direction for each, so none of it can pass on a hook that just complains
 
-⚠ SHUNT_CONF is a temp directory in every test, and the stub `ssh` means no switch here
+WARNING: SHUNT_CONF is a temp directory in every test, and the stub `ssh` means no switch here
 opens a connection.
 """
 
@@ -85,7 +85,7 @@ class HookConf:
             return f.read().strip()
 
     def put_a_directory_at(self, name):
-        """A DIRECTORY where a state file belongs — a torn write, a stray mkdir, a
+        """A DIRECTORY where a state file belongs - a torn write, a stray mkdir, a
         filesystem that lost its mind.
 
         This shape and not a frozen config dir, deliberately: freezing the whole directory
@@ -120,7 +120,7 @@ def said(reply):
     return reply.get("updatedInput", {}).get("command", "")
 
 
-# ── the way home speaks too ────────────────────────────────────────────────────
+# -- the way home speaks too ----------------------------------------------------
 
 
 class TestTheFirstCommandAfterGoingLocal(unittest.TestCase):
@@ -159,7 +159,7 @@ class TestTheFirstCommandAfterGoingLocal(unittest.TestCase):
             self.assertNotEqual(context(reply), "")
 
     def test_a_session_that_never_switched_hears_nothing(self):
-        """By far the common case — every ordinary local session — and the silence there
+        """By far the common case - every ordinary local session - and the silence there
         is what makes the one line above worth reading."""
         with HookConf() as c:
             self.assertEqual(run_hook(c, "ls -la"), {})
@@ -171,13 +171,13 @@ class TestTheFirstCommandAfterGoingLocal(unittest.TestCase):
             self.assertFalse(c.exists("switched.s1"))
 
 
-# ── one ticket, two directions ─────────────────────────────────────────────────
+# -- one ticket, two directions -------------------------------------------------
 
 
 class TestOneTicketForBothDirections(unittest.TestCase):
     """The same file carries either side's ticket, which is what makes "the last switch
     wins" true without any bookkeeping: a switch overwrites whatever the previous one
-    left. The sentinel carries an `@`, and no alias can — `@local` is caught before the
+    left. The sentinel carries an `@`, and no alias can - `@local` is caught before the
     alias branch, so the string can never arrive as a host name."""
 
     def test_going_local_arms_instead_of_clearing(self):
@@ -189,7 +189,7 @@ class TestOneTicketForBothDirections(unittest.TestCase):
     def test_no_host_can_spend_the_local_ticket(self):
         """Asked of the hook's own function: a ticket that says HOME is not @h1's to
         punch. If it were, the far side's housekeeping would ride on a switch that never
-        armed one — a `find` over somebody's disk, bought with the wrong ticket."""
+        armed one - a `find` over somebody's disk, bought with the wrong ticket."""
         with HookConf() as c:
             run_hook(c, "@h1")
             run_hook(c, "@local")
@@ -214,7 +214,7 @@ class TestOneTicketForBothDirections(unittest.TestCase):
             self.assertIn("HERE", context(run_hook(c, "ls")))
 
     def test_the_dance_across_hosts_and_home_says_something_every_step(self):
-        """@h1 → @h2 → local → @h1, one command after each. The step that used to be
+        """@h1 -> @h2 -> local -> @h1, one command after each. The step that used to be
         silent is the third."""
         with HookConf() as c:
             steps = ["@h1", "@h2", "@local", "@h1"]
@@ -223,12 +223,12 @@ class TestOneTicketForBothDirections(unittest.TestCase):
                 self.assertIn("first command since", context(run_hook(c, "pwd")), f"silent after {step}")
 
 
-# ── the writes that used to fail without a word ────────────────────────────────
+# -- the writes that used to fail without a word --------------------------------
 
 
 class TestArmingTheTicketMayNotFailInSilence(unittest.TestCase):
     """`@alias` arming was `except Exception: pass`. The switch does stand without the
-    marker — that much was true — but the loss is real and lands far away: no reminder,
+    marker - that much was true - but the loss is real and lands far away: no reminder,
     and on the far side no once-per-switch housekeeping AT ALL. The sweep of dead
     sessions' files never runs, and the one probe that reports "this session cannot
     remember its working directory" never speaks, so a session can work for hours with a
@@ -256,7 +256,7 @@ class TestArmingTheTicketMayNotFailInSilence(unittest.TestCase):
         with HookConf() as c:
             c.put_a_directory_at("switched.s1")
             message = said(run_hook(c, "@h1"))
-            self.assertIn("mode: REMOTE → h1", message)
+            self.assertIn("mode: REMOTE -> h1", message)
             self.assertEqual(c.read("target.s1"), "h1")
 
     def test_a_healthy_switch_does_not_complain(self):
@@ -264,7 +264,7 @@ class TestArmingTheTicketMayNotFailInSilence(unittest.TestCase):
             self.assertNotIn("fix it now", said(run_hook(c, "@h1")))
 
     def test_going_local_says_it_too(self):
-        """The same write, the other direction — and there the loss is the home reminder."""
+        """The same write, the other direction - and there the loss is the home reminder."""
         with HookConf() as c:
             run_hook(c, "@h1")
             c.put_a_directory_at("switched.s1")
@@ -283,14 +283,14 @@ class TestAMarkerThatCannotBeREAD(unittest.TestCase):
     """The reading side of the same ticket, and a THIRD state.
 
     A directory in its place used to fall into the one `except` that also covers "no
-    marker at all", and answer NOT ARMED — so the ticket could never be spent, the
+    marker at all", and answer NOT ARMED - so the ticket could never be spent, the
     reminder never came, the housekeeping never ran, and nothing anywhere pointed at the
     cause. Silence, with the damage landing far from it.
 
     The fix is a state of its own, and the two things it must NOT be are what these tests
     pin. It is not ABSENT (that is silence, and this is a broken config dir that has to be
     named). And it is not ARMED: calling it armed would make the hook say "first command
-    since `@local`" to a session that never switched, and — the expensive half — would buy
+    since `@local`" to a session that never switched, and - the expensive half - would buy
     the far side's once-per-switch housekeeping with a ticket nobody has read.
     """
 
@@ -324,8 +324,8 @@ class TestAMarkerThatCannotBeREAD(unittest.TestCase):
             self.assertNotIn("-delete", said(run_hook(c, "ls")))
 
     def test_it_claims_no_switch_that_it_did_not_read(self):
-        """The line it must NOT say. An unreadable marker is not evidence of a switch —
-        this session never made one — and a hook that answers "first command since
+        """The line it must NOT say. An unreadable marker is not evidence of a switch -
+        this session never made one - and a hook that answers "first command since
         `@local`" here is inventing the very fact it could not read. Unreadable is its own
         answer, never folded into ARMED."""
         with HookConf() as c:
@@ -336,8 +336,8 @@ class TestAMarkerThatCannotBeREAD(unittest.TestCase):
 
     def test_it_buys_no_housekeeping_with_a_ticket_nobody_read(self):
         """The expensive half. An unreadable marker that CAN be removed used to come back
-        as "armed and spent" — which pays for the far side's once-per-switch housekeeping:
-        a `find … -delete` over someone else's disk, bought with a ticket whose contents
+        as "armed and spent" - which pays for the far side's once-per-switch housekeeping:
+        a `find ... -delete` over someone else's disk, bought with a ticket whose contents
         nobody has seen. A failure falls to no-action, never to action."""
         with HookConf() as c:
             run_hook(c, "@h1")
@@ -348,7 +348,7 @@ class TestAMarkerThatCannotBeREAD(unittest.TestCase):
 
     def test_the_unreadable_marker_is_taken_away_so_it_is_said_once(self):
         """A complaint that cannot be acted on becomes wallpaper. When the file CAN go, it
-        goes — and the session is back to ordinary silence."""
+        goes - and the session is back to ordinary silence."""
         with HookConf() as c:
             run_hook(c, "@h1")
             os.chmod(c.path("switched.s1"), 0o000)
@@ -364,7 +364,7 @@ class TestAMarkerThatCannotBeREAD(unittest.TestCase):
 
 
 class TestTheActiveHostSidecar(unittest.TestCase):
-    """`active-host.<sid>` is written for the OUTSIDE — nothing in the hook reads it — and
+    """`active-host.<sid>` is written for the OUTSIDE - nothing in the hook reads it - and
     that is precisely why a failure to remove it has to be said: whoever does read it (a
     status line, a person in the config dir) would be told this session is on @h1 while it
     is home, and nothing else in the session would ever contradict them."""
@@ -405,7 +405,7 @@ class TestTheActiveHostSidecar(unittest.TestCase):
             self.assertNotIn("names @ ", message)
 
     def test_the_session_really_is_local_afterwards(self):
-        """The complaint is about a sidecar nobody in here reads — it may not hold the
+        """The complaint is about a sidecar nobody in here reads - it may not hold the
         session back from going home."""
         with HookConf() as c:
             run_hook(c, "@h1")
@@ -423,7 +423,7 @@ class TestTheActiveHostSidecar(unittest.TestCase):
             self.assertFalse(c.exists("active-host.s1"))
 
     def test_a_session_that_was_never_remote_is_quiet_too(self):
-        """Absent is the ordinary state — the sidecar is only written by a routed command."""
+        """Absent is the ordinary state - the sidecar is only written by a routed command."""
         with HookConf() as c:
             message = said(run_hook(c, "@local"))
             self.assertIn("mode: LOCAL", message)

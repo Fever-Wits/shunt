@@ -1,8 +1,8 @@
 """
-Tests for shunt.config — the host configuration (shunt.toml), read and written.
+Tests for shunt.config - the host configuration (shunt.toml), read and written.
 
 Why this file exists: the config is what every command depends on, and its failure mode is
-SILENT — an address in one file and its identity in another break access without a word the
+SILENT - an address in one file and its identity in another break access without a word the
 day only one side is edited. So the contract is tested from both ends: what a file MEANS
 when read, and what `shunt install` leaves behind.
 
@@ -11,17 +11,17 @@ Coverage:
   - the top-level `key` is the default; a per-host `key` wins over it
   - `~` in a key is expanded, so ssh gets a real path
   - a malformed entry (and a broken file) raises instead of resolving to nothing
-  - no shunt.toml but a legacy `hosts` file → still works, notice says where the new
+  - no shunt.toml but a legacy `hosts` file -> still works, notice says where the new
     place is, once; a legacy line that does not name ssh is not a host
   - shunt.toml wins when both files exist
-  - neither file → no hosts, and the CLI dies with a reason
+  - neither file -> no hosts, and the CLI dies with a reason
   - add_host (what `shunt install` writes): creates the file, replaces the same alias
     instead of duplicating it, keeps comments and the other hosts, round-trips
   - the HOOK resolves through the same module (end-to-end, as the harness runs it), and
-    when it CANNOT resolve — broken file, renamed alias — it refuses the command instead
+    when it CANNOT resolve - broken file, renamed alias - it refuses the command instead
     of running it on this machine
 
-Everything happens in a temp SHUNT_CONF — no real config is read or written.
+Everything happens in a temp SHUNT_CONF - no real config is read or written.
 """
 
 import io
@@ -44,7 +44,7 @@ import shunt.config as shunt_config
 PRETOOL = os.path.join(os.path.dirname(shunt_mod.__file__), "pretool.py")
 
 
-# ── helpers ────────────────────────────────────────────────────────────────────
+# -- helpers --------------------------------------------------------------------
 
 
 class TmpConf:
@@ -71,7 +71,7 @@ class TmpConf:
             return f.read()
 
     def _quiet(self, call):
-        """Load with stderr collected into `said` — so a notice is asserted, not scattered."""
+        """Load with stderr collected into `said` - so a notice is asserted, not scattered."""
         with patch("sys.stderr", new_callable=io.StringIO) as err:
             result = call()
         self.said += err.getvalue()
@@ -84,7 +84,7 @@ class TmpConf:
         return self._quiet(lambda: shunt_config.resolve(self.dir, alias))
 
 
-# ── reading shunt.toml ─────────────────────────────────────────────────────────
+# -- reading shunt.toml ---------------------------------------------------------
 
 
 class TestTomlReading(unittest.TestCase):
@@ -137,20 +137,20 @@ class TestKeys(unittest.TestCase):
             self.assertEqual(c.resolve("h2")["key"], "/keys/special")
 
     def test_no_key_anywhere_is_none(self):
-        """No key configured → ssh picks its own identity, as before."""
+        """No key configured -> ssh picks its own identity, as before."""
         with TmpConf() as c:
             c.write("shunt.toml", '[hosts]\nh1 = "root@203.0.113.1"\n')
             self.assertIsNone(c.resolve("h1")["key"])
 
     def test_tilde_is_expanded(self):
-        """ssh -i gets a path, not a shell shorthand — nothing expands it later."""
+        """ssh -i gets a path, not a shell shorthand - nothing expands it later."""
         with TmpConf() as c:
             c.write("shunt.toml", 'key = "~/.ssh/id_test"\n[hosts]\nh1 = "root@203.0.113.1"\n')
             self.assertEqual(c.resolve("h1")["key"], os.path.expanduser("~/.ssh/id_test"))
 
 
 class TestBrokenConfigIsLoud(unittest.TestCase):
-    """Silence is the failure mode here — a broken config must say so."""
+    """Silence is the failure mode here - a broken config must say so."""
 
     def test_entry_without_target_raises(self):
         with TmpConf() as c:
@@ -179,11 +179,11 @@ class TestBrokenConfigIsLoud(unittest.TestCase):
             self.assertIn("cannot read the host config", err.getvalue())
 
 
-# ── the legacy `hosts` file ────────────────────────────────────────────────────
+# -- the legacy `hosts` file ----------------------------------------------------
 
 
 class TestLegacyFallback(unittest.TestCase):
-    """An existing setup keeps working — migration is the owner's move, not the tool's."""
+    """An existing setup keeps working - migration is the owner's move, not the tool's."""
 
     def test_legacy_file_is_read_when_no_toml(self):
         with TmpConf() as c:
@@ -235,7 +235,7 @@ class TestLegacyFallback(unittest.TestCase):
             self.assertIn(os.path.join(c.dir, "shunt.toml"), c.said)
 
     def test_notice_is_said_once(self):
-        """Once per process — a line before every command would become wallpaper."""
+        """Once per process - a line before every command would become wallpaper."""
         with TmpConf() as c:
             c.write("hosts", "h1 ssh root@203.0.113.1\n")
             c.hosts()
@@ -251,7 +251,7 @@ class TestLegacyFallback(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(c.dir, "shunt.toml")))
 
 
-# ── neither file ───────────────────────────────────────────────────────────────
+# -- neither file ---------------------------------------------------------------
 
 
 class TestNothingConfigured(unittest.TestCase):
@@ -274,7 +274,7 @@ class TestNothingConfigured(unittest.TestCase):
             self.assertIn(os.path.join(c.dir, "shunt.toml"), err.getvalue())
 
 
-# ── writing: what `shunt install` leaves behind ────────────────────────────────
+# -- writing: what `shunt install` leaves behind --------------------------------
 
 
 class TestAddHost(unittest.TestCase):
@@ -315,7 +315,7 @@ class TestAddHost(unittest.TestCase):
             self.assertEqual(body.index('h1 = "root@203.0.113.7"'), body.index("# the fast one") + 1)
 
     def test_comments_and_other_hosts_survive(self):
-        """It is the owner's file — an install may not eat what is written in it."""
+        """It is the owner's file - an install may not eat what is written in it."""
         with TmpConf() as c:
             c.write(
                 "shunt.toml",
@@ -347,7 +347,7 @@ class TestAddHost(unittest.TestCase):
             self.assertEqual(c.resolve("h1")["target"], "root@203.0.113.1")
 
     def test_alias_needing_quotes_stays_one_key(self):
-        """A dot in a bare TOML key would nest a table — quote it instead."""
+        """A dot in a bare TOML key would nest a table - quote it instead."""
         with TmpConf() as c:
             shunt_config.add_host(c.dir, "srv.one", "root@203.0.113.1")
             self.assertEqual(c.resolve("srv.one")["target"], "root@203.0.113.1")
@@ -365,7 +365,7 @@ class TestAddHost(unittest.TestCase):
             self.assertIn('"~/.ssh/id_test"', c.read("shunt.toml"))
 
 
-# ── the hook reads the same config (end-to-end) ────────────────────────────────
+# -- the hook reads the same config (end-to-end) --------------------------------
 
 
 class TestHookUsesTheSameConfig(unittest.TestCase):
@@ -399,7 +399,7 @@ class TestHookUsesTheSameConfig(unittest.TestCase):
         This test replaces one that pinned the opposite ("keeps bash local"): a traceback
         in front of every command IS worse than staying home, but those were never the
         only two options. The session still says REMOTE, so a command that stays home
-        runs where nobody aimed it — `rm -rf /var/log/*` on the local disk. The hook has
+        runs where nobody aimed it - `rm -rf /var/log/*` on the local disk. The hook has
         a third move and already uses it for @unknown: replace the command with a line
         that says why nothing ran.
         """
@@ -415,7 +415,7 @@ class TestHookUsesTheSameConfig(unittest.TestCase):
             self.assertIn("NOT run", cmd)
 
     def test_renamed_alias_refuses_too(self):
-        """The config parses fine — the alias the session sits on is simply not in it."""
+        """The config parses fine - the alias the session sits on is simply not in it."""
         with TmpConf() as c:
             c.write("shunt.toml", '[hosts]\nweb-02 = "root@203.0.113.2"\n')
             with open(os.path.join(c.dir, "target.s1"), "w") as f:

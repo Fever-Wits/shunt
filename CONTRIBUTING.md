@@ -1,7 +1,7 @@
 # Contributing to shunt
 
 Thanks for helping. shunt is small and deliberately stays that way. Read this
-once — it fits on a screen.
+once - it fits on a screen.
 
 ## The stdlib-only invariant
 
@@ -9,9 +9,39 @@ once — it fits on a screen.
 runs on the Python standard library (`>=3.11`). This is not an accident: the
 hook-rewritten command runs in a strict sandbox, and the file helpers are
 deployed inline to remote hosts that may have nothing but `python3`. **Do
-not add a new dependency** — `[project].dependencies` in `pyproject.toml` stays
+not add a new dependency** - `[project].dependencies` in `pyproject.toml` stays
 empty. If you think you need one, open an issue first; the answer is almost
 always "use stdlib."
+
+## ASCII-only source
+
+**The source is ASCII**, with one deliberate exception: `U+26A0` (WARNING SIGN) and
+`U+2713` (CHECK MARK) inside messages the tool *emits* -- they are signals the reading
+model acts on, not decoration. In comments, docstrings and documentation they are
+decoration and are spelled out. A test input that genuinely needs a non-ASCII character
+is written as a `\uXXXX` escape, with a word saying which Unicode property it exercises.
+
+```sh
+grep -rnP '[^\x00-\x7F]' . --exclude-dir=.git | grep -vP '[\x{26A0}\x{2713}]'   # -> empty
+```
+
+## English only
+
+**Code, comments, docstrings, documentation and test fixtures are in English.** If a
+test needs a non-ASCII value, use one that explains itself and says why in a word:
+`cafU+00E9` for "bytes that are not ASCII", `U+00B2` or `U+0663` when the point is the Unicode
+category itself. Do not reach for another script as a stand-in - a fixture in a
+language nobody else in the file speaks is noise at best, and at worst it is the only
+thing a reader remembers about the test.
+
+## The helpers avoid f-strings - on purpose
+
+`src/shunt/edit_helper.py` and `src/shunt/write_helper.py` use `%` formatting while the
+rest of the package uses f-strings. This is not an oversight and should not be tidied
+up. Both files carry `MIN_PYTHON = (3, 3)` and a guard that answers in JSON when the
+remote interpreter is older; an f-string is 3.6 syntax, so adding one makes the file
+fail to *compile* below 3.6 and the guard can never run - a promise of protection that
+cannot fire. `tests/test_helpers_far_side.py` enforces this.
 
 ## Running tests
 
@@ -50,7 +80,7 @@ time the maintainer renames `[Unreleased]` to the new version.
 
 ## Versioning
 
-shunt uses **CalVer** with the scheme `YYYYMMDDHH` — year, month, day, hour of
+shunt uses **CalVer** with the scheme `YYYYMMDDHH` - year, month, day, hour of
 the release (e.g. `2026062322` = 2026-06-23, 22:00). There is no semantic
 major/minor/patch contract; the version simply records when a release was cut.
 The maintainer sets it in `pyproject.toml` and tags the release.

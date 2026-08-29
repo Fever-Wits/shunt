@@ -1,5 +1,5 @@
 """
-Tests for shunt.write_helper — server-side full-file writer with optimistic SHA lock.
+Tests for shunt.write_helper - server-side full-file writer with optimistic SHA lock.
 
 Drives write_helper.py exactly as shunt.cli will call it:
   - via base64 argv (inline-deploy mode)
@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -54,7 +55,7 @@ def run_via_stdin(payload: dict) -> dict:
 
 
 class TestWriteHelperNewFile(unittest.TestCase):
-    """AC-1: new file (base_sha=null) → created, verified ok."""
+    """AC-1: new file (base_sha=null) -> created, verified ok."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -65,7 +66,7 @@ class TestWriteHelperNewFile(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_new_file_created_argv(self):
-        """New file, base_sha=null, via argv → status ok, file on disk, sha matches."""
+        """New file, base_sha=null, via argv -> status ok, file on disk, sha matches."""
         content = b"hello shunt\n"
         path = os.path.join(self.tmpdir, "new_file.txt")
         self.assertFalse(os.path.exists(path))
@@ -86,7 +87,7 @@ class TestWriteHelperNewFile(unittest.TestCase):
             self.assertEqual(f.read(), content)
 
     def test_new_file_created_stdin(self):
-        """New file, base_sha=null, via stdin → status ok, file on disk."""
+        """New file, base_sha=null, via stdin -> status ok, file on disk."""
         content = b"stdin path test\n"
         path = os.path.join(self.tmpdir, "new_stdin.txt")
         self.assertFalse(os.path.exists(path))
@@ -105,7 +106,7 @@ class TestWriteHelperNewFile(unittest.TestCase):
             self.assertEqual(f.read(), content)
 
     def test_new_file_in_new_subdir(self):
-        """File in a directory that does not yet exist → directories created, file written."""
+        """File in a directory that does not yet exist -> directories created, file written."""
         content = b"nested content\n"
         path = os.path.join(self.tmpdir, "a", "b", "c", "nested.txt")
         self.assertFalse(os.path.exists(path))
@@ -122,7 +123,7 @@ class TestWriteHelperNewFile(unittest.TestCase):
         self.assertTrue(os.path.exists(path))
 
     def test_new_file_empty_content(self):
-        """New file with empty content (edge case: 0-byte file) → ok."""
+        """New file with empty content (edge case: 0-byte file) -> ok."""
         content = b""
         path = os.path.join(self.tmpdir, "empty.txt")
 
@@ -139,7 +140,7 @@ class TestWriteHelperNewFile(unittest.TestCase):
         self.assertEqual(os.path.getsize(path), 0)
 
     def test_new_file_binary_content(self):
-        """New file with binary (non-UTF-8) content → ok."""
+        """New file with binary (non-UTF-8) content -> ok."""
         content = bytes(range(256))
         path = os.path.join(self.tmpdir, "binary.bin")
 
@@ -171,7 +172,7 @@ class TestWriteHelperNewFile(unittest.TestCase):
 
 
 class TestWriteHelperExistingFileCorrectSha(unittest.TestCase):
-    """AC-2: existing file, correct base_sha → atomic overwrite, new_sha correct, verified."""
+    """AC-2: existing file, correct base_sha -> atomic overwrite, new_sha correct, verified."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -188,7 +189,7 @@ class TestWriteHelperExistingFileCorrectSha(unittest.TestCase):
         return path
 
     def test_overwrite_correct_sha_argv(self):
-        """Existing file, correct base_sha via argv → overwrite succeeds."""
+        """Existing file, correct base_sha via argv -> overwrite succeeds."""
         old_content = b"original content\n"
         new_content = b"updated content - version 2\n"
         path = self._make_file(old_content)
@@ -209,7 +210,7 @@ class TestWriteHelperExistingFileCorrectSha(unittest.TestCase):
             self.assertEqual(f.read(), new_content)
 
     def test_overwrite_correct_sha_stdin(self):
-        """Existing file, correct base_sha via stdin → overwrite succeeds."""
+        """Existing file, correct base_sha via stdin -> overwrite succeeds."""
         old_content = b"original stdin\n"
         new_content = b"updated via stdin\n"
         path = self._make_file(old_content)
@@ -293,7 +294,7 @@ class TestWriteHelperExistingFileCorrectSha(unittest.TestCase):
 
 
 class TestWriteHelperWrongSha(unittest.TestCase):
-    """AC-3: existing file, WRONG base_sha → status 'conflict', file UNCHANGED."""
+    """AC-3: existing file, WRONG base_sha -> status 'conflict', file UNCHANGED."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -310,7 +311,7 @@ class TestWriteHelperWrongSha(unittest.TestCase):
         return path
 
     def test_wrong_sha_returns_conflict(self):
-        """Wrong base_sha → status=conflict."""
+        """Wrong base_sha -> status=conflict."""
         content = b"real content\n"
         path = self._make_file(content)
         wrong_sha = "a" * 64  # obviously wrong
@@ -326,7 +327,7 @@ class TestWriteHelperWrongSha(unittest.TestCase):
         self.assertEqual(result["status"], "conflict", result)
 
     def test_wrong_sha_file_unchanged(self):
-        """Wrong base_sha → file on disk is unchanged."""
+        """Wrong base_sha -> file on disk is unchanged."""
         content = b"must not be overwritten\n"
         path = self._make_file(content)
         wrong_sha = "b" * 64
@@ -376,7 +377,7 @@ class TestWriteHelperWrongSha(unittest.TestCase):
         self.assertEqual(result.get("base_sha"), provided)
 
     def test_stale_sha_one_version_behind(self):
-        """base_sha that was valid one write ago → conflict (realistic stale-checkout scenario)."""
+        """base_sha that was valid one write ago -> conflict (realistic stale-checkout scenario)."""
         content_v1 = b"version 1\n"
         content_v2 = b"version 2\n"
         path = self._make_file(content_v1)
@@ -391,7 +392,7 @@ class TestWriteHelperWrongSha(unittest.TestCase):
             }
         )
 
-        # now attempt to write using the old sha_v1 → conflict
+        # now attempt to write using the old sha_v1 -> conflict
         result = run_via_argv(
             {
                 "file": path,
@@ -405,7 +406,7 @@ class TestWriteHelperWrongSha(unittest.TestCase):
             self.assertEqual(f.read(), content_v2)  # file still at v2
 
     def test_base_sha_supplied_but_file_missing(self):
-        """base_sha provided but file does not exist → conflict (current_sha=None)."""
+        """base_sha provided but file does not exist -> conflict (current_sha=None)."""
         path = os.path.join(self.tmpdir, "does_not_exist.txt")
         self.assertFalse(os.path.exists(path))
 
@@ -417,14 +418,14 @@ class TestWriteHelperWrongSha(unittest.TestCase):
             }
         )
 
-        # current_sha of a missing file is None; base_sha is non-null → mismatch → conflict
+        # current_sha of a missing file is None; base_sha is non-null -> mismatch -> conflict
         self.assertEqual(result["status"], "conflict")
         # file must NOT be created
         self.assertFalse(os.path.exists(path))
 
 
 class TestWriteHelperSizeGuard(unittest.TestCase):
-    """AC-4: oversized content → error, no file written."""
+    """AC-4: oversized content -> error, no file written."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -440,13 +441,13 @@ class TestWriteHelperSizeGuard(unittest.TestCase):
         return env
 
     def test_oversized_b64_payload_rejected(self):
-        """b64 payload that exceeds 2× MAX_BYTES limit → error before decoding.
+        """b64 payload that exceeds 2x MAX_BYTES limit -> error before decoding.
 
         The guard is: len(content_b64) > MAX * 2.
         b64 expands by 4/3, so we need content_len > 1.5 * MAX (= 151 bytes when MAX=100).
         """
         max_bytes = 100
-        # 151 bytes → b64 is 204 chars > 2*100=200: triggers the first guard
+        # 151 bytes -> b64 is 204 chars > 2*100=200: triggers the first guard
         content = b"X" * 151
         b64_str = b64(content)
         # verify precondition: this really does exceed the guard threshold
@@ -477,13 +478,13 @@ class TestWriteHelperSizeGuard(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
 
     def test_oversized_decoded_bytes_rejected(self):
-        """Content whose decoded size exceeds MAX_BYTES but b64 passes first check → error."""
+        """Content whose decoded size exceeds MAX_BYTES but b64 passes first check -> error."""
         # The first guard triggers when len(b64) > MAX*2.
         # The second guard is len(decoded) > MAX.
         # To trigger only the second guard we need len(b64) <= MAX*2 but len(decoded) > MAX.
-        # That is geometrically impossible (b64 is always ≥ decoded), so we instead
+        # That is geometrically impossible (b64 is always >= decoded), so we instead
         # verify that for a payload right at the boundary, the size is correctly enforced.
-        # We set MAX=10 and content of 11 bytes → b64 ~16 chars, 2*MAX=20 → first guard passes,
+        # We set MAX=10 and content of 11 bytes -> b64 ~16 chars, 2*MAX=20 -> first guard passes,
         # second guard (11 > 10) catches it.
         max_bytes = 10
         content = b"X" * (max_bytes + 1)  # 11 bytes
@@ -542,7 +543,7 @@ class TestWriteHelperSizeGuard(unittest.TestCase):
 
 
 class TestWriteHelperBadInput(unittest.TestCase):
-    """Error handling: malformed input → status=error, no crash."""
+    """Error handling: malformed input -> status=error, no crash."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -553,7 +554,7 @@ class TestWriteHelperBadInput(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_bad_base64_argv(self):
-        """Corrupted base64 argv → error (bad request)."""
+        """Corrupted base64 argv -> error (bad request)."""
         r = subprocess.run(
             [PYTHON, WRITE_HELPER, "not-valid-base64!!!"],
             capture_output=True,
@@ -564,7 +565,7 @@ class TestWriteHelperBadInput(unittest.TestCase):
         self.assertIn("bad request", result["message"].lower())
 
     def test_invalid_json_stdin(self):
-        """Non-JSON stdin → error (bad request)."""
+        """Non-JSON stdin -> error (bad request)."""
         r = subprocess.run(
             [PYTHON, WRITE_HELPER],
             input="{not valid json",
@@ -575,7 +576,7 @@ class TestWriteHelperBadInput(unittest.TestCase):
         self.assertEqual(result["status"], "error")
 
     def test_bad_b64_content_field(self):
-        """content_b64 field contains invalid base64 → error."""
+        """content_b64 field contains invalid base64 -> error."""
         path = os.path.join(self.tmpdir, "bad_b64.txt")
         result = run_via_argv(
             {
@@ -588,14 +589,14 @@ class TestWriteHelperBadInput(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
 
 
-# ── what happens AROUND the write, when the write itself succeeds ──────────────
+# -- what happens AROUND the write, when the write itself succeeds --------------
 
 # The two steps that used to answer for themselves. `chown` was wrapped in a bare
 # `except: pass`; the directory `fsync` sat inside the guard that reports "write failed".
 # Neither can be provoked by an argument, so the failure is injected where the helper
 # actually runs: a `sitecustomize` module on PYTHONPATH, which CPython imports at startup,
 # breaks the one os call each test is about. Everything else is the real helper, in a real
-# subprocess, writing a real file — which is what makes "the write still landed" provable
+# subprocess, writing a real file - which is what makes "the write still landed" provable
 # rather than argued.
 
 BREAK_CHOWN = """
@@ -615,6 +616,23 @@ def _dir_fails(fd):
         raise OSError(5, "Input/output error")
     return _real(fd)
 os.fsync = _dir_fails
+"""
+
+
+# The verify-after-write READ. It cannot be provoked by an argument either: the helper
+# opens the file it has just renamed into place, so the only way in is to break that one
+# call. The second "rb" open is it - the first is the current-state read above.
+BREAK_VERIFY_READ = """
+import builtins
+_real = builtins.open
+_seen = [0]
+def _fail_the_second_read(file, mode="r", *a, **k):
+    if "r" in mode and "b" in mode and "+" not in mode:
+        _seen[0] += 1
+        if _seen[0] == 2:
+            raise OSError(5, "Input/output error")
+    return _real(file, mode, *a, **k)
+builtins.open = _fail_the_second_read
 """
 
 
@@ -642,13 +660,13 @@ class TestWhatFailsAroundTheWriteIsSaid(unittest.TestCase):
     """Two silences, opposite in shape, one rule between them: say what happened.
 
     **chown, swallowed.** The temp file belongs to whoever runs the helper, and `os.replace`
-    carries that owner onto the path — so a chown that fails changes the file's OWNER while
+    carries that owner onto the path - so a chown that fails changes the file's OWNER while
     the content lands perfectly. On `authorized_keys`, a unit file, a key: the write is not
     the damage, the ownership is, and `except: pass` meant nobody was told.
 
     **the directory fsync, over-reported.** It runs AFTER `os.replace`, so by the time it
     can fail the new content already IS the file. Reported as `write failed` it told the
-    caller their write had not happened when it had — and `shunt commit` then left
+    caller their write had not happened when it had - and `shunt commit` then left
     `base_sha` at the old value, so the NEXT commit read a remote sha that no longer
     matched: a CONFLICT invented by a write that succeeded.
     """
@@ -670,7 +688,7 @@ class TestWhatFailsAroundTheWriteIsSaid(unittest.TestCase):
     def _payload(self, path, base_sha, new=b"the new content\n"):
         return {"file": path, "content_b64": b64(new), "base_sha": base_sha}
 
-    # ── chown ────────────────────────────────────────────────────────────────
+    # -- chown ----------------------------------------------------------------
 
     def test_a_chown_that_failed_is_reported(self):
         path, base = self._existing()
@@ -694,7 +712,7 @@ class TestWhatFailsAroundTheWriteIsSaid(unittest.TestCase):
         with open(path, "rb") as f:
             self.assertEqual(f.read(), b"the new content\n")
 
-    # ── the directory fsync ──────────────────────────────────────────────────
+    # -- the directory fsync --------------------------------------------------
 
     def test_a_directory_fsync_failure_is_not_a_failed_write(self):
         path, base = self._existing()
@@ -709,17 +727,97 @@ class TestWhatFailsAroundTheWriteIsSaid(unittest.TestCase):
             self.assertEqual(f.read(), b"the new content\n")
 
     def test_it_is_still_said_out_loud(self):
-        """Not an error, and not silence either — durability is a real thing to lose."""
+        """Not an error, and not silence either - durability is a real thing to lose."""
         path, base = self._existing()
         result = run_with_broken_os(self._payload(path, base), BREAK_DIR_FSYNC)
         said = " ".join(result.get("warnings", []))
         self.assertIn("fsync", said)
         self.assertIn("Input/output error", said)
 
-    # ── and the ordinary answer keeps its shape ──────────────────────────────
+    # -- and the ordinary answer keeps its shape ------------------------------
 
     def test_a_clean_write_carries_no_warnings_key(self):
         path, base = self._existing()
         result = run_via_argv(self._payload(path, base))
         self.assertEqual(result["status"], "ok", result)
         self.assertNotIn("warnings", result)
+
+
+class TestAVerifyThatCouldNotHappenSaysSo(unittest.TestCase):
+    """`verified` is the field a caller tests to know the write was PROVEN.
+
+    Both ways the verify can fail are errors, and both must carry it. The mismatch did;
+    the read that could not happen did not - so a caller asking `result["verified"]` got
+    `None` from a helper that had just failed to prove anything. Falsy by luck reads the
+    same as falsy by answer until the day someone asks `is False`.
+    """
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="shunt-test-verifyread-")
+        self.path = os.path.join(self.d, "f.txt")
+        with open(self.path, "wb") as f:
+            f.write(b"before\n")
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def _result(self):
+        return run_with_broken_os(
+            {"file": self.path, "content_b64": b64(b"after\n"), "base_sha": sha256(b"before\n")},
+            BREAK_VERIFY_READ,
+        )
+
+    def test_it_is_an_error(self):
+        self.assertEqual(self._result()["status"], "error")
+
+    def test_it_says_the_verify_is_what_failed(self):
+        self.assertIn("verify-read failed", self._result()["message"])
+
+    def test_it_carries_verified_false(self):
+        """The twin two lines below it always did."""
+        self.assertIs(self._result().get("verified"), False)
+
+    def test_the_content_landed_anyway(self):
+        """The rename happened before the verify - the file IS written, which is why this
+        is an unproven write and not a failed one."""
+        self._result()
+        with open(self.path, "rb") as f:
+            self.assertEqual(f.read(), b"after\n")
+
+
+class TestAMalformedRequestIsAnAnswerToo(unittest.TestCase):
+    """The twin of edit_helper's guard. `os.path.realpath(7)` and `len(None)` raised
+    outside any try, where this file promises JSON."""
+
+    def test_a_file_that_is_not_a_string(self):
+        r = run_via_argv({"file": 7, "content_b64": b64(b"x"), "base_sha": None})
+        self.assertEqual(r["status"], "error")
+        self.assertIn("bad request", r["message"])
+
+    def test_a_content_that_is_not_a_string(self):
+        r = run_via_argv({"file": "/tmp/whatever", "content_b64": None, "base_sha": None})
+        self.assertEqual(r["status"], "error")
+        self.assertIn("bad request", r["message"])
+
+    def test_nothing_reaches_stderr(self):
+        arg = base64.b64encode(json.dumps({"file": 7, "content_b64": "eA=="}).encode()).decode()
+        proc = subprocess.run([PYTHON, WRITE_HELPER, arg], capture_output=True, text=True)
+        self.assertEqual(proc.stderr, "", "a traceback reached stderr")
+
+    def test_a_base_sha_that_is_not_a_string(self):
+        """A wrong ANSWER rather than a traceback: truthy and unequal to any digest, so the
+        lock answered `conflict` about a change nobody had made."""
+        d = tempfile.mkdtemp(prefix="shunt-test-badreq-")
+        try:
+            path = os.path.join(d, "f.txt")
+            with open(path, "wb") as f:
+                f.write(b"before\n")
+            r = run_via_argv({"file": path, "content_b64": b64(b"after\n"), "base_sha": 7})
+            self.assertEqual(r["status"], "error")
+            self.assertIn("base_sha", r["message"])
+            with open(path, "rb") as f:
+                self.assertEqual(f.read(), b"before\n")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)

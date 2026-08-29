@@ -1,33 +1,33 @@
 """
-Tests for pretool.py — what happens when the HOOK ITSELF crashes.
+Tests for pretool.py - what happens when the HOOK ITSELF crashes.
 
 The finding this file exists for is not a bug in shunt; it is what the harness does with
 one. A hook that raises exits non-zero-but-not-2, and that is a NON-BLOCKING error: the
 message is shown and the ORIGINAL command runs. On a session routed to a server, that is
-`rm -rf /srv/old` — written for the far machine — deleting the local tree, reached through
+`rm -rf /srv/old` - written for the far machine - deleting the local tree, reached through
 shunt's own traceback rather than through anything the user did wrong.
 
 Two fixes already in this tree have exactly that shape, each found after the fact and each
 closing ONE path:
 
-  · `os.makedirs(CONF)` stood outside the guard the write below it sat in, so `@web-01`
+  - `os.makedirs(CONF)` stood outside the guard the write below it sat in, so `@web-01`
     against a broken config dir went to bash as a command (test_pretool_target_state.py);
-  · the routing file was written with `open(…, "w")`, which truncates, so a write dying in
+  - the routing file was written with `open(..., "w")`, which truncates, so a write dying in
     between left a file that existed and named no host.
 
 The umbrella closes the class instead of the next instance: `main()` is now a roof over
 `decide()`, and an exception that reaches it is answered the way the hook-input branches
-answer their own blindness — by WHO can still repair the hook.
+answer their own blindness - by WHO can still repair the hook.
 
-  Bash            → BLOCKED, exit 2, the reason and the traceback on stderr.
-  any other tool  → ALLOWED and TOLD, traceback inside the message. Read/Edit/Grep cannot
+  Bash            -> BLOCKED, exit 2, the reason and the traceback on stderr.
+  any other tool  -> ALLOWED and TOLD, traceback inside the message. Read/Edit/Grep cannot
                     act on another machine, and they are the door out: a deterministic bug
                     that blocked them too would cost the session, every session.
-  tool unknown    → BLOCKED, all of it. A crash before `tool_name` was read cannot tell a
+  tool unknown    -> BLOCKED, all of it. A crash before `tool_name` was read cannot tell a
                     bash command from a file read.
 
-⚠ These tests run the hook IN-PROCESS. Everything else in this suite spawns it the way the
-harness does, and should; an injected failure cannot cross that boundary — and no input or
+WARNING: These tests run the hook IN-PROCESS. Everything else in this suite spawns it the way the
+harness does, and should; an injected failure cannot cross that boundary - and no input or
 filesystem shape reaches these paths, which was verified before the roof was written (a
 config dir that cannot be written to, a session id with a NUL byte, a non-dict tool_input:
 the hook answers all of them cleanly). That is the point: the roof is for what has not
@@ -37,11 +37,11 @@ Coverage:
   - a crash on the REMOTE path (the dangerous one) blocks with exit 2 and runs nothing
   - a crash EARLIER, before the routing is even read, does the same
   - the caller's command survives nowhere in the reply
-  - the reason and the traceback reach stderr — "fix the hook" needs an address
+  - the reason and the traceback reach stderr - "fix the hook" needs an address
   - exit code is exactly 2: 1 would be non-blocking, which is the whole defect
   - the repairing hands stay open: a file tool runs, and is told, with the traceback
-  - …unless the tool's name is what the crash came before — then nothing goes through
-  - the roof does NOT swallow the deliberate exits — a rewrite, a refusal and a switch all
+  - ...unless the tool's name is what the crash came before - then nothing goes through
+  - the roof does NOT swallow the deliberate exits - a rewrite, a refusal and a switch all
     still come out the way they always did
 """
 
@@ -84,7 +84,7 @@ def run_hook(conf, payload, break_fn=None, exc=None):
     """Run the hook in-process, optionally with one function replaced by a failure.
 
     Returns (exit code, stdout, stderr). The failure is injected at a real call site on a
-    real path — not at decide() itself — so what is being proved is that a crash ANYWHERE
+    real path - not at decide() itself - so what is being proved is that a crash ANYWHERE
     inside comes out as a refusal.
     """
     out, err = io.StringIO(), io.StringIO()
@@ -111,18 +111,18 @@ def run_hook(conf, payload, break_fn=None, exc=None):
 
 
 def what_runs(stdout):
-    """The command the harness would run — "" when the hook wrote no reply at all."""
+    """The command the harness would run - "" when the hook wrote no reply at all."""
     if not stdout.strip():
         return ""
     return json.loads(stdout)["hookSpecificOutput"].get("updatedInput", {}).get("command", "")
 
 
-# ── a crash on the path where it costs the most ────────────────────────────────
+# -- a crash on the path where it costs the most --------------------------------
 
 
 class TestACrashOnTheRemotePathIsBlocked(unittest.TestCase):
     """The session is routed to @h1 and the rewrite is the very last thing that happens.
-    A failure there used to fall out of main() as a traceback — and the command the caller
+    A failure there used to fall out of main() as a traceback - and the command the caller
     wrote for the server then ran on this machine."""
 
     def _crash(self, conf):
@@ -136,7 +136,7 @@ class TestACrashOnTheRemotePathIsBlocked(unittest.TestCase):
     def test_it_blocks(self):
         with HookConf() as c:
             code, _, err = self._crash(c)
-            self.assertEqual(code, 2, "exit 0/1 is NON-BLOCKING — the harness then runs the original command")
+            self.assertEqual(code, 2, "exit 0/1 is NON-BLOCKING - the harness then runs the original command")
             self.assertIn("CRASHED", err)
 
     def test_the_command_does_not_run(self):
@@ -171,7 +171,7 @@ class TestACrashOnTheRemotePathIsBlocked(unittest.TestCase):
 
     def test_the_traceback_names_the_line(self):
         """Saying "fix the hook" with no address is not an instruction. The traceback is how the
-        session that is now without bash still knows where to Edit — from outside it."""
+        session that is now without bash still knows where to Edit - from outside it."""
         with HookConf() as c:
             _, _, err = self._crash(c)
             self.assertIn("Traceback", err)
@@ -211,7 +211,7 @@ class TestACrashBeforeTheRoutingIsReadIsBlockedToo(unittest.TestCase):
         """A file tool's notice already sits in an `except Exception: pass` whose comment
         reads "never break someone else's tool", and it is right: a `Read` must not die
         because a warning could not be composed. The roof does not overrule a fail-open
-        that was chosen on purpose; it catches what escapes one — which is why the tests
+        that was chosen on purpose; it catches what escapes one - which is why the tests
         below inject at `_missing_field`, above the tool branch, instead."""
         with HookConf() as c:
             c.route_to("h1")
@@ -223,14 +223,14 @@ class TestACrashBeforeTheRoutingIsReadIsBlockedToo(unittest.TestCase):
             self.assertEqual(code, 0)
 
 
-# ── the hands that repair the hook stay open ───────────────────────────────────
+# -- the hands that repair the hook stay open -----------------------------------
 
 
 class TestTheRepairingHandsSurviveACrash(unittest.TestCase):
     """Blocking every tool on any crash would wall up the one door out: `Edit` on
     pretool.py needs no bash, and a deterministic bug would otherwise cost the session,
     every session, until someone reached a terminal outside it. So the roof asks the same
-    question the `missing` branch asks — which tool is this — and answers it the same way.
+    question the `missing` branch asks - which tool is this - and answers it the same way.
 
     The failure is injected at `_missing_field`, which runs AFTER `tool_name` is read and
     BEFORE the tool branch: the roof therefore knows what it is looking at, and the crash
@@ -248,7 +248,7 @@ class TestTheRepairingHandsSurviveACrash(unittest.TestCase):
         with HookConf() as c:
             for tool in ("Read", "Edit", "Write", "Grep", "Glob"):
                 code, out, _ = self._crash_on(c, tool, {"file_path": "/etc/hosts"})
-                self.assertEqual(code, 0, "%s was stopped — the hook cannot be repaired from in here" % tool)
+                self.assertEqual(code, 0, "%s was stopped - the hook cannot be repaired from in here" % tool)
                 self.assertNotIn("updatedInput", out, "%s must run as it was asked" % tool)
 
     def test_and_is_told_what_happened(self):
@@ -260,7 +260,7 @@ class TestTheRepairingHandsSurviveACrash(unittest.TestCase):
             self.assertIn("bash commands are REFUSED", said)
 
     def test_the_traceback_travels_with_it(self):
-        """At exit 0 the message is the only channel there is — and it is the message the
+        """At exit 0 the message is the only channel there is - and it is the message the
         tool that will fix pretool.py is reading."""
         with HookConf() as c:
             _, out, _ = self._crash_on(c, "Edit", {"file_path": "/x"})
@@ -298,7 +298,7 @@ class TestACrashBeforeTheToolIsKnownStopsEverything(unittest.TestCase):
     unreadable-input branch already refuses for: with no tool name, a bash command and a
     file read are the same shape, and only one of them is safe to let through.
 
-    Reaching it takes a failure in the handful of lines ABOVE the tool name — where the
+    Reaching it takes a failure in the handful of lines ABOVE the tool name - where the
     only ordinary failure (`json.load` on bad bytes) is already caught and answered. So it
     is reached the way it would really be reached: reading stdin dies with something that
     is not an `Exception` at all, which no `except Exception` in there catches.
@@ -327,7 +327,7 @@ class TestACrashBeforeTheToolIsKnownStopsEverything(unittest.TestCase):
             self.assertIn("CRASHED", err)
 
     def test_it_says_why_everything_is_stopped(self):
-        """The price is named rather than dodged — the same way the unreadable-input
+        """The price is named rather than dodged - the same way the unreadable-input
         branch names it."""
         with HookConf() as c:
             _, _, err = self._crash_before_the_name(c)
@@ -341,8 +341,8 @@ class TestACrashBeforeTheToolIsKnownStopsEverything(unittest.TestCase):
 
     def test_a_name_from_an_earlier_call_is_not_reused(self):
         """The roof reads a module global, and a suite calls this twice in one process.
-        A `Read` that crashed a moment ago must not make the NEXT crash — the one with no
-        name at all — look like a file tool and be waved through."""
+        A `Read` that crashed a moment ago must not make the NEXT crash - the one with no
+        name at all - look like a file tool and be waved through."""
         with HookConf() as c:
             run_hook(
                 c,
@@ -371,11 +371,11 @@ class TestAnInterruptedHookIsACrashToo(unittest.TestCase):
             self.assertNotIn("rm -rfv", what_runs(out))
 
 
-# ── and the deliberate exits are NOT swallowed ─────────────────────────────────
+# -- and the deliberate exits are NOT swallowed ---------------------------------
 
 
 class TestTheRoofLetsEveryDeliberateAnswerThrough(unittest.TestCase):
-    """emit, echo, warn and block all exit — a roof that caught SystemExit would catch the
+    """emit, echo, warn and block all exit - a roof that caught SystemExit would catch the
     whole hook. This is the line the roof must never cross, and it is asserted at each of
     the four shapes rather than argued once."""
 

@@ -1,11 +1,11 @@
 """
-Tests for shunt.cli — the `bg` subcommand (long jobs on a host, via systemd-run).
+Tests for shunt.cli - the `bg` subcommand (long jobs on a host, via systemd-run).
 
 Four silences met here, of the same shape: a first step whose failure nobody looks at,
 and a second step that speaks as if it had succeeded.
 
-  --stop  ran `systemctl stop JOB; …; echo stopped`. The `;` let the stop fail and the
-          `echo` say "stopped" anyway — and since `echo` was the last command, ssh came
+  --stop  ran `systemctl stop JOB; ...; echo stopped`. The `;` let the stop fail and the
+          `echo` say "stopped" anyway - and since `echo` was the last command, ssh came
           back 0, so a script reading the exit code carried on too. A mistyped unit name
           answered exactly like a real one while the job kept running: the tool stated
           what it had not verified.
@@ -18,21 +18,21 @@ and a second step that speaks as if it had succeeded.
 
   --list  ended in `|| true`. `systemctl list-units` already exits 0 when the glob
           matches nothing, so the guard bought the empty list nothing and paid out only
-          when the question could not be answered at all — no systemd, no permission, a
-          bad invocation — handing back exit 0 and no output, which is indistinguishable
+          when the question could not be answered at all - no systemd, no permission, a
+          bad invocation - handing back exit 0 and no output, which is indistinguishable
           from "this host has no jobs". No motive for the guard was ever recorded: it
           arrived with the first commit that tracked this file, and later silent-failure
           passes walked past it. It was measured instead of guessed at, and removed.
 
   --status ran `systemctl show`, which INVENTS an answer for a unit it has never heard
-          of: every property at its default — Result=success, SubState=dead,
-          ExecMainStatus=0 — at exit 0. A mistyped job name was therefore indistinguishable
+          of: every property at its default - Result=success, SubState=dead,
+          ExecMainStatus=0 - at exit 0. A mistyped job name was therefore indistinguishable
           from a job that had finished cleanly, in the one hand here that runs with nobody
           watching the screen. LoadState is what tells them apart.
 
 Coverage:
   - --status refuses to dress a unit that is not there as a job that succeeded, names it,
-    and still shows what systemd said — contradicted rather than hidden
+    and still shows what systemd said - contradicted rather than hidden
   - a host that cannot answer at all (no systemd, no permission) says THAT instead
   - --stop ties both the word and the exit code to what systemctl actually did
   - a stop that fails says nothing about having stopped anything
@@ -42,7 +42,7 @@ Coverage:
   - --list hands back what systemctl actually did, and an empty list is still a success
   - the ordinary shapes (--status, starting a job) are untouched
 
-ssh is stubbed everywhere — no connection is attempted. SHUNT_CONF points at a temp dir
+ssh is stubbed everywhere - no connection is attempted. SHUNT_CONF points at a temp dir
 with one fake host.
 """
 
@@ -61,7 +61,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import shunt.cli as shunt_mod
 
 
-# ── helpers ────────────────────────────────────────────────────────────────────
+# -- helpers --------------------------------------------------------------------
 
 
 class TmpHosts:
@@ -141,7 +141,7 @@ LIST_MATCHES_NOTHING = "exit 0\n"  # what real systemctl does: says nothing, suc
 LIST_HAS_JOBS = 'echo "shunt-A1B2C3D4.service loaded active running /bin/sh -c nightly"\nexit 0\n'
 
 
-# ── --stop: the word and the exit code must follow the deed ────────────────────
+# -- --stop: the word and the exit code must follow the deed --------------------
 
 
 class TestStopIsHonest(unittest.TestCase):
@@ -160,7 +160,7 @@ class TestStopIsHonest(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
 
     def test_a_failed_stop_still_says_WHY(self):
-        """systemctl's own stderr was never the problem — it must survive the fix."""
+        """systemctl's own stderr was never the problem - it must survive the fix."""
         r = run_far_side(self._script(), stop_succeeds=False)
         self.assertIn("not loaded", r.stderr)
 
@@ -175,7 +175,7 @@ class TestStopIsHonest(unittest.TestCase):
 
     def test_the_cleanup_stays_fire_and_forget(self):
         """reset-failed is housekeeping after a stop that happened: silenced, and its
-        result read by nobody — but it may not run when the stop did not."""
+        result read by nobody - but it may not run when the stop did not."""
         script = self._script()
         self.assertIn("reset-failed", script)
         self.assertIn("2>/dev/null", script)
@@ -186,14 +186,14 @@ class TestStopIsHonest(unittest.TestCase):
         self.assertIn("'weird; rm -rf /'", script)
 
 
-# ── --list: a question that could not be answered is not an empty answer ───────
+# -- --list: a question that could not be answered is not an empty answer -------
 
 
 class TestListIsHonest(unittest.TestCase):
     """`|| true` used to ride on the end of the --list command.
 
-    It never bought the empty list anything — `systemctl list-units` already exits 0
-    when the glob matches nothing — and it cost the only case that mattered: a systemctl
+    It never bought the empty list anything - `systemctl list-units` already exits 0
+    when the glob matches nothing - and it cost the only case that mattered: a systemctl
     that could NOT answer came back 0 with no output, which reads exactly like "this host
     has no jobs". The caller cannot tell the two apart, and the wrong one is silent.
     """
@@ -213,7 +213,7 @@ class TestListIsHonest(unittest.TestCase):
         self.assertNotIn("|| true", self._script())
 
     def test_a_failed_list_still_says_WHY(self):
-        """systemctl's own stderr was never the problem — it must survive the fix."""
+        """systemctl's own stderr was never the problem - it must survive the fix."""
         r = run_far_side_with_systemctl(self._script(), LIST_CANNOT_ANSWER)
         self.assertIn("Connection reset", r.stderr)
 
@@ -229,7 +229,7 @@ class TestListIsHonest(unittest.TestCase):
         self.assertIn("shunt-A1B2C3D4", r.stdout)
 
 
-# ── --name: a flag without its value is refused, not absorbed ──────────────────
+# -- --name: a flag without its value is refused, not absorbed ------------------
 
 
 class TestNameNeedsALabel(unittest.TestCase):
@@ -276,15 +276,41 @@ class TestNameNeedsALabel(unittest.TestCase):
             script, _ = bg_with_stubbed_ssh(["@h1", "sleep 60", "--name", "Nightly Build!"])
         self.assertIn("--unit=shunt-nightly-build", script)
 
+    def test_an_illegal_character_becomes_a_dash_rather_than_vanishing(self):
+        """REPLACED, not removed - `deploy 2.0` is `deploy-2-0`, not `deploy20`. The README
+        described this as stripping for a while, which reads as the opposite unit name."""
+        with TmpHosts():
+            script, _ = bg_with_stubbed_ssh(["@h1", "sleep 60", "--name", "deploy 2.0"])
+        self.assertIn("--unit=shunt-deploy-2-0", script)
 
-# ── the fourth silence: --status on a unit that does not exist ─────────────────
+    def test_a_label_that_sanitises_to_nothing_falls_back_to_the_random_name(self):
+        """A label with nothing in `a-z0-9-` leaves an empty string. The job must still
+        start and still print its JOB= line - a named job that cannot be named is not a
+        refusal.
+
+        U+00E9 is the non-ASCII case: one accented Latin letter, outside the allowed set
+        the same way any non-Latin script would be, without dragging a script into a
+        fixture that is not about scripts.
+        """
+        for label in ("...", "\u00e9"):
+            with self.subTest(label=label), TmpHosts():
+                script, _ = bg_with_stubbed_ssh(["@h1", "sleep 60", "--name", label])
+                self.assertIn("--unit=shunt-", script)
+                self.assertNotIn("--unit=shunt- ", script)  # not an empty name
+                self.assertIn("JOB=", script)
+
+
+# -- the fourth silence: --status on a unit that does not exist -----------------
+
+
+# -- the fourth silence: --status on a unit that does not exist -----------------
 
 
 class TestStatusOfAJobThatIsNotThere(unittest.TestCase):
     """`systemctl show` INVENTS an answer for a unit it has never heard of.
 
-    Every property comes back at its default — `Result=success`, `SubState=dead`,
-    `ExecMainStatus=0` — and it exits 0 while doing it. So a mistyped job name read exactly
+    Every property comes back at its default - `Result=success`, `SubState=dead`,
+    `ExecMainStatus=0` - and it exits 0 while doing it. So a mistyped job name read exactly
     like a job that had finished cleanly: the same shape as the three silences above, in
     the hand that runs with nobody watching the screen. LoadState is the one property that
     tells them apart, and it is asked as a QUESTION rather than merely printed, because a
@@ -320,13 +346,13 @@ exit 0
         self.assertIn("--list", r.stderr)
 
     def test_the_invented_properties_are_still_shown(self):
-        """Not hidden — contradicted. The reader sees what systemd said AND that it was
+        """Not hidden - contradicted. The reader sees what systemd said AND that it was
         said about a unit that is not there."""
         r = run_far_side_with_systemctl(self.script_for(), self.SYSTEMD_INVENTING_AN_ANSWER)
         self.assertIn("Result=success", r.stdout)
 
     def test_a_real_job_is_untouched(self):
-        """The guard may not cost the ordinary question its answer — including a job that
+        """The guard may not cost the ordinary question its answer - including a job that
         ran and failed, which is a successful ANSWER to a status query."""
         r = run_far_side_with_systemctl(self.script_for(), self.A_REAL_JOB_THAT_FAILED)
         self.assertEqual(r.returncode, 0)
@@ -335,7 +361,7 @@ exit 0
 
     def test_a_host_without_systemd_says_so_and_does_not_pass(self):
         """The other way the question goes unanswered: no systemd, no permission, a bad
-        invocation. Silence there would read as "no such job" — a different fact."""
+        invocation. Silence there would read as "no such job" - a different fact."""
         r = run_far_side_with_systemctl(self.script_for(), "exit 127\n")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("could not ask systemd", r.stderr)
@@ -348,7 +374,7 @@ exit 0
         self.assertNotIn("systemctl show my job", script)
 
 
-# ── the shapes that were already right stay right ──────────────────────────────
+# -- the shapes that were already right stay right ------------------------------
 
 
 class TestUntouchedShapes(unittest.TestCase):
@@ -376,22 +402,22 @@ class TestUntouchedShapes(unittest.TestCase):
         self.assertIn("JOB=shunt-", script)
 
 
-# ── the fifth silence: the argv that was typed is not the argv that arrived ────
+# -- the fifth silence: the argv that was typed is not the argv that arrived ----
 
 
 def run_far_side_with_stubs(script, stub_bodies):
     """Run the generated remote script under a shell whose named commands are stubs.
 
     The question here is not "what string did shunt build" but "what argv does the FAR
-    machine end up with", and only a shell can answer that — so the script is executed,
+    machine end up with", and only a shell can answer that - so the script is executed,
     the way the --stop and --list tests above already execute theirs.
 
     Two named departures, both harmless to the question:
-      · the `systemd-run` stub runs the `bash -lc CMD` it was handed as `bash -c CMD`.
+      - the `systemd-run` stub runs the `bash -lc CMD` it was handed as `bash -c CMD`.
         A login shell would re-read /etc/profile and rewrite PATH out from under the
         stubs; login files change nothing about word splitting, which is the whole of
         what is being asked.
-      · the stubs report on STDERR, because the real script sends systemd-run's stdout
+      - the stubs report on STDERR, because the real script sends systemd-run's stdout
         to /dev/null.
     """
     binn = tempfile.mkdtemp(prefix="shunt-test-bg-argv-")
@@ -411,7 +437,7 @@ def run_far_side_with_stubs(script, stub_bodies):
         shutil.rmtree(binn, ignore_errors=True)
 
 
-# `systemd-run --collect --remain-after-exit --unit=X bash -lc CMD` → run CMD
+# `systemd-run --collect --remain-after-exit --unit=X bash -lc CMD` -> run CMD
 SYSTEMD_RUN_STUB = 'exec "$4" -c "$6"\n'
 # every argument the far shell handed us, one per line, unambiguously bracketed
 ECHO_ARGV_STUB = 'for a in "$@"; do echo "ARG:[$a]" >&2; done\n'
@@ -420,7 +446,7 @@ ECHO_ARGV_STUB = 'for a in "$@"; do echo "ARG:[$a]" >&2; done\n'
 class TestTheArgvSurvivesTheTrip(unittest.TestCase):
     """`bg` assembled its command with ` `.join(rest), so every argument that carried a
     space was RE-SPLIT on the far side: `shunt bg @h1 rm -rf "/var/lib/My App"` arrived as
-    `rm -rf /var/lib/My App` — two paths, neither of them the one that was typed. The
+    `rm -rf /var/lib/My App` - two paths, neither of them the one that was typed. The
     sibling hand had it right all along: `cmd_run` re-quotes with shlex.join and passes a
     single argument through verbatim, and this is now the same split.
 
@@ -447,7 +473,7 @@ class TestTheArgvSurvivesTheTrip(unittest.TestCase):
         self.assertNotIn("[App]", args)
 
     def test_the_flags_are_still_flags(self):
-        """Re-quoting must not quote what needed no quoting — `-rf` stays an option."""
+        """Re-quoting must not quote what needed no quoting - `-rf` stays an option."""
         args = self._argv_on_the_far_side(["@h1", "rm", "-rf", self.PATH_WITH_A_SPACE])
         self.assertEqual(args, ["[-rf]", f"[{self.PATH_WITH_A_SPACE}]"])
 
@@ -460,13 +486,13 @@ class TestTheArgvSurvivesTheTrip(unittest.TestCase):
 
     def test_a_name_that_eats_the_whole_line_is_refused(self):
         """`--name` is stripped out of the command, so `bg @h1 --name deploy` left nothing
-        behind — and ` `.join made "" out of nothing, starting a systemd unit around an
+        behind - and ` `.join made "" out of nothing, starting a systemd unit around an
         empty command that reported JOB=shunt-deploy and did nothing."""
         with TmpHosts():
             with patch.object(sys, "stderr", io.StringIO()) as err:
                 with self.assertRaises(SystemExit):
                     # ssh stubbed on purpose, and the reason is the defect itself: without
-                    # the refusal this line does not stop — it goes on to OPEN A CONNECTION
+                    # the refusal this line does not stop - it goes on to OPEN A CONNECTION
                     # and start the empty job. A test for a missing guard has to survive
                     # the code that is missing it.
                     bg_with_stubbed_ssh(["@h1", "--name", "deploy"])

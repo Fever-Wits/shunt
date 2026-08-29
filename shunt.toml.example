@@ -1,4 +1,4 @@
-# ~/.config/shunt/shunt.toml — the machines shunt can reach.
+# ~/.config/shunt/shunt.toml - the machines shunt can reach.
 #
 # Everything a host needs lives HERE, on purpose. An address kept in one file and its
 # identity in another (~/.ssh/config) breaks silently the day only one of them is edited.
@@ -7,11 +7,11 @@
 key = "~/.ssh/id_ed25519_shunt"
 
 [hosts]
-# <alias> = "<user>@<host>"   — the usual form; `@<alias>` switches the session there
+# <alias> = "<user>@<host>"   - the usual form; `@<alias>` switches the session there
 web-01 = "user@203.0.113.10"
 web-02 = "user@203.0.113.20"
 
-# A machine that needs a DIFFERENT identity — the extended form; its `key` wins over
+# A machine that needs a DIFFERENT identity - the extended form; its `key` wins over
 # the default above:
 # special = { target = "user@203.0.113.30", key = "~/.ssh/id_ed25519_special" }
 
@@ -22,7 +22,7 @@ web-02 = "user@203.0.113.20"
 
 
 # The audit log (~/.config/shunt/audit.log, read with `shunt log`) is an ARCHIVE, and
-# trimming it is a FUSE — not a retention policy. Size is the trigger; age is only the
+# trimming it is a FUSE - not a retention policy. Size is the trigger; age is only the
 # unit in which room gets freed. The question people bring to this file is "where did we
 # download that from, two months ago", and a short window answers it with silence.
 #
@@ -30,6 +30,6 @@ web-02 = "user@203.0.113.20"
 # That is intended: a fuse that blows regularly is a policy in disguise.
 [audit]
 trim_at_mb  = 100    # trim only once the log grows past this
-drop_months = 2      # then the OLDEST months go — the rest of the history stays
-                     # (if everything in the file is recent — something wrote a month's
-                     #  worth in an hour — the oldest lines go until it fits)
+drop_months = 2      # then the OLDEST months go - the rest of the history stays
+                     # (if everything in the file is recent - something wrote a month's
+                     #  worth in an hour - the oldest lines go until it fits)

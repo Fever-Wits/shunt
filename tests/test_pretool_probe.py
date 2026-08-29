@@ -1,15 +1,15 @@
 """
-Tests for pretool.py — the live probe a switch makes before it announces a host.
+Tests for pretool.py - the live probe a switch makes before it announces a host.
 
 `@web-01` used to be a note in a local file and nothing more. The hook wrote the alias,
 said "mode: REMOTE", and whether anything was listening over there was discovered by the
-first command that tried — an ssh error arriving in the middle of other work, minutes
+first command that tried - an ssh error arriving in the middle of other work, minutes
 later, read as a failure of that work. The moment the caller is thinking ABOUT the machine
 is the moment to tell them it does not answer, so the switch now asks.
 
 Two decisions ride in these tests, both deliberate:
 
-  the switch STANDS whatever the answer — a host may be rebooting, and a session that has
+  the switch STANDS whatever the answer - a host may be rebooting, and a session that has
   said where it wants to be is not sent home behind its own back. What changes is that the
   truth is spoken.
 
@@ -18,17 +18,17 @@ Two decisions ride in these tests, both deliberate:
 
 Coverage:
   - the switch really asks: one ssh, at the switch, and nowhere else
-  - it asks over the SAME options the caller's commands will use — including the socket,
+  - it asks over the SAME options the caller's commands will use - including the socket,
     so the ask also warms the tunnel it tested
-  - a host that answers → "connected"; one that does not → the switch is written, the
+  - a host that answers -> "connected"; one that does not -> the switch is written, the
     silence is named, and the routing really does stand
   - what ssh said reaches the caller: the LAST line, where the reason lives
-  - no ssh binary at all → neither verdict is claimed
-  - the probe cannot hang the hook: a deadline, and — the trap this design is shaped
-    around — a ControlPersist master that backgrounds itself holding our descriptors
+  - no ssh binary at all -> neither verdict is claimed
+  - the probe cannot hang the hook: a deadline, and - the trap this design is shaped
+    around - a ControlPersist master that backgrounds itself holding our descriptors
   - the probe's own output cannot corrupt the hook's, which is a JSON protocol on stdout
 
-⚠ No test here opens a real connection. The address is not ours to knock on, and a suite
+WARNING: No test here opens a real connection. The address is not ours to knock on, and a suite
 that reaches the network is a suite whose result depends on somebody else's router.
 """
 
@@ -88,7 +88,7 @@ class HookConf:
         os.chmod(path, 0o755)
 
     def no_ssh_at_all(self):
-        """A PATH where no `ssh` exists — the probe cannot be made at all."""
+        """A PATH where no `ssh` exists - the probe cannot be made at all."""
         os.remove(os.path.join(self.bin, "ssh"))
         return self.bin  # used ALONE as PATH, so the real ssh cannot be found either
 
@@ -119,13 +119,13 @@ def run_bash(conf, command, sid="s1", path=None):
 
 
 def said(stdout):
-    """What the hook put in place of the caller's command — "" when it said nothing."""
+    """What the hook put in place of the caller's command - "" when it said nothing."""
     if not stdout.strip():
         return ""
     return json.loads(stdout)["hookSpecificOutput"].get("updatedInput", {}).get("command", "")
 
 
-# ── the switch asks ────────────────────────────────────────────────────────────
+# -- the switch asks ------------------------------------------------------------
 
 
 class TestTheSwitchAsksTheMachine(unittest.TestCase):
@@ -155,14 +155,14 @@ class TestTheSwitchAsksTheMachine(unittest.TestCase):
         """The switch announcement is what every other test in the suite reads."""
         with HookConf() as c:
             _, out = run_bash(c, "@h1")
-            self.assertIn("mode: REMOTE → h1", said(out))
+            self.assertIn("mode: REMOTE -> h1", said(out))
 
 
-# ── and when nothing answers ───────────────────────────────────────────────────
+# -- and when nothing answers ---------------------------------------------------
 
 
 class TestAHostThatDoesNotAnswer(unittest.TestCase):
-    """The hard half. The switch is still written — on purpose — so the message has to
+    """The hard half. The switch is still written - on purpose - so the message has to
     carry the whole truth: where the session now is, and that nothing will come of it
     until the machine is back."""
 
@@ -178,7 +178,7 @@ class TestAHostThatDoesNotAnswer(unittest.TestCase):
             self.assertIn("@h1", message)
 
     def test_it_claims_no_cause_it_did_not_check(self):
-        """A failed `ssh … true` proves that THIS CHECK did not get through — never that
+        """A failed `ssh ... true` proves that THIS CHECK did not get through - never that
         the machine is down. A refused key, a changed host key and a broken login shell all
         answer from a machine that is wide awake, and a cause guessed in the loudest line
         sends the reader to look in the wrong place."""
@@ -216,7 +216,7 @@ class TestAHostThatDoesNotAnswer(unittest.TestCase):
             self.assertIn("root@203.0.113.9", said(out))
 
     def test_the_reminder_is_still_owed(self):
-        """The ticket is armed by the switch, not by the answer — the first command still
+        """The ticket is armed by the switch, not by the answer - the first command still
         runs THERE, and still says so."""
         with HookConf() as c:
             self._switch_onto_silence(c)
@@ -241,18 +241,18 @@ class TestAHostThatDoesNotAnswer(unittest.TestCase):
             self.assertNotIn("Permanently added", message)
 
 
-# ── whose words are these ──────────────────────────────────────────────────────
+# -- whose words are these ------------------------------------------------------
 
 
 class TestTheReasonIsAttributedExactlyOnce(unittest.TestCase):
-    """The detail lands INSIDE our own sentence, so it has to say who is speaking — a
+    """The detail lands INSIDE our own sentence, so it has to say who is speaking - a
     reader must not take ssh's words for the tool's verdict. But ssh's own transport
     failures already open with that attribution, and adding it blindly stutters:
 
-        … did not answer the check … ssh: ssh: connect to host … Connection timed out
+        ... did not answer the check ... ssh: ssh: connect to host ... Connection timed out
 
     Cosmetic, which is why it stood for a while: it never lied and never went quiet. The
-    fix is a test, not a strip — the other shape of failure has no prefix to keep.
+    fix is a test, not a strip - the other shape of failure has no prefix to keep.
     """
 
     def _detail(self, stderr):
@@ -267,18 +267,18 @@ class TestTheReasonIsAttributedExactlyOnce(unittest.TestCase):
         self.assertIn("ssh: connect to host", message)
 
     def test_a_line_without_it_is_still_attributed(self):
-        """Auth failures are the other shape — `user@host: Permission denied` names the
-        ACCOUNT, not the program — and they still have to say who is speaking."""
+        """Auth failures are the other shape - `user@host: Permission denied` names the
+        ACCOUNT, not the program - and they still have to say who is speaking."""
         message = self._detail("nosuchuser@203.0.113.9: Permission denied (publickey,password).")
         self.assertIn("ssh: nosuchuser@203.0.113.9: Permission denied", message)
 
 
-# ── the third answer: the probe that could not be made ─────────────────────────
+# -- the third answer: the probe that could not be made -------------------------
 
 
 class TestAProbeThatCouldNotRun(unittest.TestCase):
     """Could-not-ask is not does-not-answer. Announcing a dead host on a question that
-    never left this machine is the hook stating what it has not verified — and the caller
+    never left this machine is the hook stating what it has not verified - and the caller
     would go looking at a machine that is perfectly fine."""
 
     def test_no_ssh_binary_claims_neither_verdict(self):
@@ -297,16 +297,16 @@ class TestAProbeThatCouldNotRun(unittest.TestCase):
         """The probe is a courtesy on top of the switch, never a gate in front of it."""
         with HookConf() as c:
             _, out = run_bash(c, "@h1", path=c.no_ssh_at_all())
-            self.assertIn("mode: REMOTE → h1", said(out))
+            self.assertIn("mode: REMOTE -> h1", said(out))
             self.assertTrue(c.exists("target.s1"))
 
 
-# ── what it costs ──────────────────────────────────────────────────────────────
+# -- what it costs --------------------------------------------------------------
 
 
 class TestTheProbeIsPaidForOnceperSwitch(unittest.TestCase):
     """A round trip on every command would be a tax on the whole session for a fact that
-    changes rarely — and the commands themselves already report a connection that has
+    changes rarely - and the commands themselves already report a connection that has
     died. The switch is the one moment that is about the machine."""
 
     def test_ordinary_commands_ask_nothing(self):
@@ -334,7 +334,7 @@ class TestTheProbeIsPaidForOnceperSwitch(unittest.TestCase):
             self.assertEqual(c.asks(), [])
 
 
-# ── it must test the path the command will take ────────────────────────────────
+# -- it must test the path the command will take --------------------------------
 
 
 class TestTheProbeGoesTheWayTheCommandWill(unittest.TestCase):
@@ -376,12 +376,12 @@ class TestTheProbeGoesTheWayTheCommandWill(unittest.TestCase):
             self.assertIn("/keys/own", self._argv_of_the_probe(c))
 
 
-# ── the probe may not become the thing that hangs ──────────────────────────────
+# -- the probe may not become the thing that hangs ------------------------------
 
 
 class TestTheProbeCannotHangTheHook(unittest.TestCase):
     """The hook runs in FRONT of every command. Anything here that can wait forever waits
-    in front of the caller's work — so the probe is asked in-process, where the deadline
+    in front of the caller's work - so the probe is asked in-process, where the deadline
     can be made short enough to test."""
 
     def setUp(self):
@@ -418,14 +418,14 @@ class TestTheProbeCannotHangTheHook(unittest.TestCase):
 
     def test_a_master_that_backgrounds_itself_does_not_hold_us(self):
         """THE trap this design is shaped around. With ControlPersist, ssh leaves a master
-        running in the background — and it inherits whatever descriptors it was given. Had
+        running in the background - and it inherits whatever descriptors it was given. Had
         the probe read stdout/stderr through a PIPE, it would wait for that master to exit
         (five minutes) and the deadline would fire on the healthiest case there is: a host
         that answered on the very first connection.
 
-        ⚠ The background job must NOT redirect its own streams. A stub written as
+        WARNING: The background job must NOT redirect its own streams. A stub written as
         `sleep 30 >/dev/null 2>&1 &` inherits nothing and the test passes on a pipe-based
-        probe as readily as on this one — measured: 0.00s either way. Bare `&` is what
+        probe as readily as on this one - measured: 0.00s either way. Bare `&` is what
         makes it hold our descriptors, and then a pipe-based probe times out (measured:
         3.00s against a 3s deadline) while this one returns at once.
         """
@@ -443,11 +443,11 @@ class TestTheProbeCannotHangTheHook(unittest.TestCase):
         self.assertLess(spent, 1)
 
 
-# ── the probe's output may not touch the hook's ────────────────────────────────
+# -- the probe's output may not touch the hook's --------------------------------
 
 
 class TestTheProbeCannotCorruptTheProtocol(unittest.TestCase):
-    """The hook's stdout IS the protocol — one JSON object, read by the harness. A child
+    """The hook's stdout IS the protocol - one JSON object, read by the harness. A child
     process that inherits it and prints one line makes that object unparseable, and an
     unparseable hook reply means the ORIGINAL command runs: `@h1` goes to bash as a
     command while the caller reads nothing at all."""

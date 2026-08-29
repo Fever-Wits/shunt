@@ -1,26 +1,26 @@
 """
-Tests for pretool.py — what a SPAWNED agent is told about the machine it was born on.
+Tests for pretool.py - what a SPAWNED agent is told about the machine it was born on.
 
 The parent has been warned about spawning into remote mode for a while. The agent itself
-heard nothing — and it is the one that acts on it: it runs `ls`, reads a disk it has never
+heard nothing - and it is the one that acts on it: it runs `ls`, reads a disk it has never
 seen, and reports what it found as a fact about the world. (Observed once as "the Bash
 tool briefly lost access to the working directory". It had not. It was elsewhere.)
 
 So the hook writes a short frame into the child's prompt. Three things had to be true for
 that to be worth doing, and each has tests here:
 
-  it must be a FRAME, not a fact — "you are on @h1" gives an agent nothing to do; what
+  it must be a FRAME, not a fact - "you are on @h1" gives an agent nothing to do; what
       routes the commands, what it means for its two hands (bash goes there, files stay
       here) and the way out is a thing it can act on;
 
-  the way out must carry its PRICE. The harness gives a child its parent's session_id —
-      documented, and confirmed in this installation's own transcripts — so every file
+  the way out must carry its PRICE. The harness gives a child its parent's session_id -
+      documented, and confirmed in this installation's own transcripts - so every file
       this hook keys on is ONE slot shared by the parent and every agent running at that
       moment. `@local` from a child moves everybody. Offering it without saying so would
       hand the child a way to reroute its parent mid-command;
 
   the rest of the Agent call must survive the trip. `updatedInput` replaces a tool's
-      arguments, so the whole input goes back — an Agent call that lost its
+      arguments, so the whole input goes back - an Agent call that lost its
       `subagent_type` inside a hook is a much worse failure than an unwritten note.
 
 Coverage:
@@ -29,7 +29,7 @@ Coverage:
   - it names the way home AND that the switch is shared
   - every other field of the Agent input comes back untouched
   - the parent's warning still rides in the SAME reply
-  - every spawn gets one — no budget, and no budget shared with Grep
+  - every spawn gets one - no budget, and no budget shared with Grep
   - a local session is untouched, and so is an Agent call with no prompt to write into
   - the unreadable-routing state deliberately does NOT write a note (it announces itself
     to the child through the very first refused command)
@@ -101,7 +101,7 @@ def child_prompt(reply):
     return reply.get("updatedInput", {}).get("prompt")
 
 
-# ── the note itself ────────────────────────────────────────────────────────────
+# -- the note itself ------------------------------------------------------------
 
 
 class TestTheChildIsTold(unittest.TestCase):
@@ -156,7 +156,7 @@ class TestTheChildIsTold(unittest.TestCase):
     def test_and_the_price_of_taking_it(self):
         """The measured fact that shaped this text: parent and children share ONE
         session_id, so the routing is one slot. A child that goes `@local` takes its
-        parent — and its siblings — with it. Without this sentence the note would be
+        parent - and its siblings - with it. Without this sentence the note would be
         handing out a footgun politely."""
         with HookConf() as c:
             c.route_to("h1")
@@ -165,12 +165,12 @@ class TestTheChildIsTold(unittest.TestCase):
             self.assertIn("spawned you", note)
 
 
-# ── the input the note travels in ──────────────────────────────────────────────
+# -- the input the note travels in ----------------------------------------------
 
 
 class TestNothingElseIsLostOnTheWay(unittest.TestCase):
     """`updatedInput` replaces a tool's arguments. A note written by returning only the
-    prompt would strip `subagent_type` from the call — the hook would silently change
+    prompt would strip `subagent_type` from the call - the hook would silently change
     WHICH agent runs, which is far worse than never writing a note at all."""
 
     def test_every_other_field_survives(self):
@@ -202,7 +202,7 @@ class TestNothingElseIsLostOnTheWay(unittest.TestCase):
 
     def test_a_prompt_too_long_to_hand_back_keeps_the_parents_warning(self):
         """This reply carries the child's WHOLE prompt back, so its size is the caller's,
-        not ours — and the harness caps what a hook may say. A reply cut off mid-string is
+        not ours - and the harness caps what a hook may say. A reply cut off mid-string is
         not JSON: the harness would log a parse error, run the original call, and the
         parent would lose the warning it has always had. So past the budget the note is
         dropped and the warning goes out alone."""
@@ -226,7 +226,7 @@ class TestNothingElseIsLostOnTheWay(unittest.TestCase):
             self.assertNotIn("permissionDecision", spawn(c))
 
 
-# ── the parent still hears it, in the same breath ──────────────────────────────
+# -- the parent still hears it, in the same breath ------------------------------
 
 
 class TestTheParentIsStillWarned(unittest.TestCase):
@@ -256,7 +256,7 @@ class TestTheParentIsStillWarned(unittest.TestCase):
             self.assertIn("INHERITS", second["additionalContext"])
 
     def test_a_grep_cannot_spend_the_spawns_word(self):
-        """The file tools share a once-per-host budget. Agent must not draw on it — one
+        """The file tools share a once-per-host budget. Agent must not draw on it - one
         Grep would otherwise leave every later child born into silence."""
         with HookConf() as c:
             c.route_to("h1")
@@ -270,7 +270,7 @@ class TestTheParentIsStillWarned(unittest.TestCase):
             self.assertEqual(code, 0)
 
 
-# ── and where it stays quiet ───────────────────────────────────────────────────
+# -- and where it stays quiet ---------------------------------------------------
 
 
 class TestWhereNoNoteIsWritten(unittest.TestCase):
@@ -282,7 +282,7 @@ class TestWhereNoNoteIsWritten(unittest.TestCase):
 
     def test_the_unreadable_state_warns_the_parent_but_writes_no_note(self):
         """Deliberate, and the asymmetry is the reasoning: while the routing cannot be
-        read, main() REFUSES every bash command with both ways out named — so the child
+        read, main() REFUSES every bash command with both ways out named - so the child
         learns from its own first command. The remote state is the silent one, where the
         commands succeed on a machine nobody mentioned."""
         with HookConf() as c:
