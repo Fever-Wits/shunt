@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
-## [Unreleased]
+## [2026083009] - 2026-08-30
 
 Two themes. **A tool that states only what it has verified** - a refusal naming a
 separator that was not one, a fuse that emptied the log it protects, an audit line a
