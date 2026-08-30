@@ -15,14 +15,26 @@ always "use stdlib."
 
 ## ASCII-only source
 
-**The source is ASCII**, with one deliberate exception: `U+26A0` (WARNING SIGN) and
-`U+2713` (CHECK MARK) inside messages the tool *emits* -- they are signals the reading
-model acts on, not decoration. In comments, docstrings and documentation they are
-decoration and are spelled out. A test input that genuinely needs a non-ASCII character
-is written as a `\uXXXX` escape, with a word saying which Unicode property it exercises.
+**The source is ASCII**, with one deliberate exception: `U+26A0` (WARNING SIGN),
+`U+2713` (CHECK MARK) and `U+2139` (INFORMATION SOURCE) inside messages the tool
+*emits* to the reading model -- these are signal glyphs: attention cues the model
+acts on, not decoration. The rule is by role, not by character: a new glyph that
+appears inside an emitted message is kept and added to this list; the same glyph
+in a comment, docstring or piece of documentation is decoration and is spelled out
+instead. A test input that genuinely needs a non-ASCII character is written as a
+`\uXXXX` escape, with a word saying which Unicode property it exercises.
+
+| glyph | code point | Unicode name | what it looks like | what it tells the reading model |
+| --- | --- | --- | --- | --- |
+| ⚠ | U+26A0 | WARNING SIGN | a triangle with an exclamation mark | "be careful here" |
+| ✓ | U+2713 | CHECK MARK | a tick | "this is fine / done" |
+| ℹ | U+2139 | INFORMATION SOURCE | a circled lowercase i | "informational, no action needed" |
+
+This table is the one place a document shows the glyphs themselves -- here they are the
+subject, not decoration; the anchor below skips exactly these three code points.
 
 ```sh
-grep -rnP '[^\x00-\x7F]' . --exclude-dir=.git | grep -vP '[\x{26A0}\x{2713}]'   # -> empty
+grep -rnP '[^\x00-\x7F]' . --exclude-dir=.git | grep -vP '[\x{26A0}\x{2713}\x{2139}]'   # -> empty
 ```
 
 ## English only

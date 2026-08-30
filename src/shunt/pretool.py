@@ -530,6 +530,8 @@ def _prompt_plus(tool_input, note):
     return updated
 
 
+# The glyphs inside these notices (U+26A0 warning triangle, U+2713 check mark, U+2139
+# circled i) are signal cues for the reading model - keep them; see CONTRIBUTING.md.
 def _tell_the_spawn_and_its_parent(alias, tool_input):
     """One reply, two readers: the note to the child, the warning to the parent. Never returns.
 
