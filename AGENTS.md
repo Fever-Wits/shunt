@@ -11,9 +11,9 @@ redirects bash to a chosen remote host. Pure stdlib, Python >=3.11.
 
 ## Hard invariant - stdlib only
 `dependencies = []` in `pyproject.toml`. NEVER add a third-party runtime dependency - ever.
-The hook runs inside a restricted sandbox (root, no `~/.config/shunt`, network OK) with only the
-system `python3` and `ssh`, and the helpers are deployed inline to servers that may have nothing
-but `python3`; an import of anything non-stdlib breaks them.
+shunt asks to be wired in as a bare `python3 <path>` - no venv, no activation - so the hook runs on
+whatever `python3` is on PATH - not necessarily the environment shunt was installed into, and the helpers are deployed inline
+to servers that may have nothing but `python3`; an import of anything non-stdlib breaks them.
 Keep it stdlib. (`ruff`/`hatchling` are dev/build tools, not runtime deps.)
 
 ## Critical safety gotcha

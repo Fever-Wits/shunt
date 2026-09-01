@@ -40,7 +40,7 @@ None of that limits what the agent may do once it is there. `ssh` protects the c
 ## Trust & data flow
 
 1. The **PreToolUse hook** (`pretool.py`) runs locally with your privileges. It reads routing from `~/.config/shunt` (the `shunt.toml` config - or the legacy `hosts` file - and the per-session `target.<sid>`) and rewrites the agent's bash command.
-2. The **rewritten command runs in the agent's sandbox** - which has network access but **no access to `~/.config/shunt`** (documented in `pretool.py`). That constraint is why the client is the `ssh` binary already present in the sandbox, with the whole invocation baked into the rewritten string.
+2. **Claude Code runs the rewritten string** through its normal Bash path, with your local privileges. It stands on its own: the hook resolved host, key path and session id before returning, so the routing needs no lookup when the command runs.
 3. `ssh` with `ControlMaster` carries the command to the remote host over a multiplexed, encrypted, key-authenticated channel; cwd is preserved per session via a remote state file. No open port, no shared token.
 4. The remote host executes and streams stdout/stderr back. An **interrupted** foreground command is not killed on the far side - no pty is allocated, so nothing sends it SIGHUP, and it runs to its own end.
 

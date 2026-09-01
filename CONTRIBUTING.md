@@ -7,7 +7,7 @@ once - it fits on a screen.
 
 **shunt has zero runtime dependencies and must keep it that way.** Everything
 runs on the Python standard library (`>=3.11`). This is not an accident: the
-hook-rewritten command runs in a strict sandbox, and the file helpers are
+hook is invoked as a bare `python3 <path>`, and the file helpers are
 deployed inline to remote hosts that may have nothing but `python3`. **Do
 not add a new dependency** - `[project].dependencies` in `pyproject.toml` stays
 empty. If you think you need one, open an issue first; the answer is almost

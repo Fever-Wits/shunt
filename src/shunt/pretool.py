@@ -4,7 +4,9 @@ shunt - pretool.py - PreToolUse hook
 
 Two jobs, one file - because both need the same answer to "where is this session routed?":
 
-  Bash   -> REWRITE: the command runs on the chosen remote machine, transparently.
+  Bash   -> REWRITE: the command runs on the chosen remote machine, written as if it were
+           local. One expansion context instead of two: nothing to escape on the way, and
+           no `$HOME` or `$(...)` quietly resolving on the machine you left.
   others -> WARN: these tools do NOT follow the mode (the hook rewrites bash only), so
            running them in remote mode is reported instead of silently doing the wrong
            thing. Not blocked - remote-mode-plus-local-file is legitimate as often as
@@ -22,14 +24,14 @@ cannot be taken back leaving for another machine) - said, never blocked, see emi
 Switching: @<alias> / @local / @status - PER-SESSION (does not clash across parallel sessions).
 
 The transport is ssh + ControlMaster: zero open ports, zero shared token, encrypted.
-Proven: cwd state-file per session, live streaming, speed. It is the only one - the hosts
+Proven: cwd state-file per session, live streaming. It is the only one - the hosts
 come from ~/.config/shunt/shunt.toml (config.py, shared with the CLI).
 
 Why hook + updatedInput (rather than replacing the shell): official, documented mechanism;
 we stay independent of undocumented env settings.
 
-CRITICAL: the rewritten command runs in a strict sandbox (root, no ~/.config/shunt, BUT network
-OK). That is why the client is the `ssh` binary, which is available in the sandbox.
+The rewritten string is complete when it leaves: host, key path and session id are resolved
+HERE, in this process, so what `shunt log` and the transcript show is the whole invocation.
 """
 
 import json  # `re` costs nothing extra - json loads it anyway
@@ -1214,8 +1216,7 @@ def resolve_host(alias):
 # -- where the far side remembers this session's directory ---------------------
 # A path written for the REMOTE shell, never for os.path: `$HOME` is the account we LAND
 # IN over there, which is routinely not the one running this hook (a local user -> remote
-# root), and the rewritten command runs in a sandbox with no home of ours at all.
-# Expanding it HERE would bake a local home into a remote path - a directory that is not
+# root). Expanding it HERE would bake a local home into a remote path - a directory that is not
 # on the far machine - and the state would quietly never be written again.
 # WARNING: Never shlex.quote THIS: single quotes hand `$HOME` over as five literal characters,
 # and the far shell then makes a directory by that name wherever the command landed. Only
@@ -1333,14 +1334,15 @@ def ssh_opts(host, sid):
     below: this name cannot be guessed from outside, so a world-writable directory hands
     nobody a path to sit on first. The CLI's name has no such part - it must stay
     predictable to be REUSED between separate calls - so its place had to become private
-    instead. The sandbox is the second reason: the rewritten command may not share a
-    private directory of ours, while /tmp it always has.
+    instead.
 
-    The THIRD copy of this knowledge is the CLI's own ssh_opts (cli.py). It cannot be
-    imported - the rewritten command runs in a sandbox that has no files of ours - so the
-    two are kept aligned by tests instead (tests/test_ssh_opts.py), which is also where
-    the socket's `%r` was found missing. TWO of them, because the socket is not the whole
-    of what has to match: `...key_on_the_same_things` compares the socket NAME, and
+    The THIRD copy of this knowledge is the CLI's own ssh_opts (cli.py). The CLI imports this
+    file, so importing it back would load a second copy of this module - it resolves today
+    only because the hook runs as `__main__`, and costs ~13 ms on every hook run besides.
+    The two are kept aligned by tests
+    instead (tests/test_ssh_opts.py), which is also where the socket's `%r` was found missing.
+    TWO of them, because the socket is not the whole of what has to match:
+    `...key_on_the_same_things` compares the socket NAME, and
     `...carry_the_same_options` compares which options are asked of ssh at all. This line
     named only the first for a while and read as though it covered both.
     """
@@ -1398,8 +1400,8 @@ def probe_host(host, sid):
     fire on the healthiest case there is: a host that answered on the first connection.
 
     The master it opens is deliberately the one the next command wants, so a switch also
-    WARMS the tunnel. Best-effort by nature - the rewritten command runs in a sandbox that
-    may not share this /tmp - and nothing here depends on it: an unused master closes
+    WARMS the tunnel. Best-effort by nature - the master it warms may be gone by the
+    time the next command runs - and nothing here depends on it: an unused master closes
     itself after ControlPersist.
 
     subprocess and tempfile are imported HERE, not at the top: measured, the two cost

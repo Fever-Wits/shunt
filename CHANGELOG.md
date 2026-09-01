@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
+## [2026090112] - 2026-09-01
+
+One theme. **A justification outliving the design it was written for** - the comments and
+the public docs described the environment the rewritten command runs in, a description
+written for a transport that is gone.
+
+### Changed
+
+- **The comments and docs describe what the code does, not the environment it runs in.**
+  A review of every statement about the agent's execution environment found several
+  written for the `daemon` transport - which had to read a token at run time - and left
+  behind when it went, growing broader each time they were restated. Code and
+  documentation were gone through together: `pretool.py`, `SECURITY.md`,
+  `ARCHITECTURE.md`, `AGENTS.md` and `CONTRIBUTING.md` now state that host, key path and
+  session id are resolved in the hook process and only the finished string travels, and
+  state nothing about what that environment permits - shunt does not depend on the answer.
+  Behaviour is unchanged.
+
 ## [2026083009] - 2026-08-30
 
 Two themes. **A tool that states only what it has verified** - a refusal naming a

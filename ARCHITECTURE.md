@@ -254,8 +254,7 @@ drift apart.
   `shunt-cm-cli-%r@%h:%p.sock` in `$XDG_RUNTIME_DIR/shunt/` when the environment
   offers one, `~/.cache/shunt/` otherwise, created at mode 700. The asymmetry is
   the point: the hook's name carries a session id and cannot be guessed, so a
-  world-writable directory hands nobody a path to occupy first, and the sandbox
-  the rewritten command runs in may not share a private directory of ours. The
+  world-writable directory hands nobody a path to occupy first. The
   CLI has no such part in its name - it must stay predictable, because the whole
   value of a muxed socket is that the *next* `shunt` call finds the master the
   last one left - so its **place** carries the privacy instead. A `ControlPath`
@@ -265,19 +264,15 @@ drift apart.
 - **`BatchMode=yes` / `StrictHostKeyChecking=accept-new`** keep it
   non-interactive and first-connect-friendly.
 
-What the reuse is worth, measured on a LAN with a bare `ssh ... true`, three runs
-(2026-08-05): **0.24-0.36 s** per call without a master, **0.25 s** for the first
-call with one (it brings the master up) and **0.01 s** for every call after. The
-gain lives in the repetitions, not in the first command. Measured across the full
-cycle instead - python start plus hook plus ssh - the same setup is **0.27-0.32 s**
-cold and **0.017-0.033 s** warm.
+What the reuse is worth: without a master every call pays a full ssh handshake;
+with one, the first call brings the master up and every call after rides it. The
+gain lives in the repetitions, not in the first command.
 
 The transport requires only the `ssh` binary on the local side. That is not an
-aesthetic choice: the rewritten command runs in the agent's restricted sandbox,
-which has network access but **no access to `~/.config/shunt`**. A client shunt
-would have to deploy, or one that needed to read the config at execution time,
-could not work there. `ssh` is already present, and the hook bakes the whole
-invocation into the rewritten string.
+aesthetic choice: ssh is what carries the command to the far host either way, so
+a client of ours would be a second program to deploy on top of it. The hook resolves
+the host, the key path and the session id before it returns, and only the finished
+string travels, with the whole invocation baked into it.
 
 ### No pty: an interrupted command keeps running
 
@@ -735,9 +730,8 @@ same sandbox. Building on that surface means:
 - **Stability across upgrades** - no dependence on undocumented internals.
 - **Transparency** - the agent keeps issuing ordinary `Bash` calls; redirection
   is invisible to it.
-- **Sandbox compatibility** - rewritten commands run in the agent's existing
-  restricted sandbox, which is exactly why the transport leans on the
-  always-present `ssh` binary.
+- **Nothing extra to deploy for a routed command** - rewritten commands carry the whole invocation and lean on
+  the always-present `ssh` binary.
 
 ---
 

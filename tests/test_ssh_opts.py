@@ -174,8 +174,8 @@ class TestHookControlPath(unittest.TestCase):
     def test_the_hook_and_the_cli_carry_the_same_options(self):
         """The socket was only ONE of the things these two copies must agree on.
 
-        pretool.ssh_opts cannot import the CLI's (the rewritten command runs in a sandbox
-        with no files of ours), so a test is the only thing holding them together - and
+        pretool.ssh_opts does not import the CLI's (that would cost ~13 ms on every bash
+        command of the session), so a test is the only thing holding them together - and
         until now it compared the socket NAME alone. An option added to one side and not
         the other passed straight through: the probe would then test a path the command
         does not take, which is the whole reason the two were written to match.
