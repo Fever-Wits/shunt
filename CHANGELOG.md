@@ -10,8 +10,8 @@ and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 Two themes. **A justification outliving the design it was written for** - the comments and
 the public docs described the environment the rewritten command runs in, a description
 written for a transport that is gone. And **a diagnosis that named the wrong machine** - a
-host name long enough to overflow ssh's connection-reuse socket made ssh refuse the
-connection outright, and the failure read as the host being down.
+long host name overflows the path to the connection-reuse socket, and the failure looks
+like an unreachable machine.
 
 ### Changed
 
@@ -27,15 +27,10 @@ connection outright, and the failure read as the host being down.
 
 ### Fixed
 
-- **A long host name no longer misdiagnoses as an unreachable machine.** The socket that
-  makes ssh's connection reuse possible is a file, and before binding it ssh writes a
-  temporary path 17 bytes longer than the real one and renames it into place - so the
-  usable limit is not the platform's raw socket-path size but that size minus 17: 90 bytes
-  on Linux, 86 on macOS. The path is built from `/tmp/shunt-cm-` + the session id (36
-  bytes) + `-` + `user@host:port` + `.sock`. A host name long enough to exceed it made ssh
-  connect, authenticate, and only then fail to bind the socket (exit 255), and the
-  transport epilogue then read that as "`@alias` is down or unreachable" - a diagnosis for
-  a machine that had already answered. The switch now measures the path itself and, past
+- **A long host name no longer misdiagnoses as an unreachable machine.** A host name long
+  enough to make the connection-reuse socket path too long for a unix socket made the
+  transport epilogue read that as "`@alias` is down or unreachable" - a diagnosis for a
+  machine that had already answered. The switch now measures the path itself and, past
   the limit, says the true cause instead: use the IP in place of the long name, or set
   `control_master = false` for that host in `shunt.toml` - every command then runs there
   without connection reuse (each pays its own ssh handshake). Default is `true`; nothing
@@ -166,9 +161,10 @@ Entries that change behaviour you may have relied on are marked ⚠.
   created, commands still run - what is lost is connection reuse, not the command.
 
   Measured while moving it, because it decides the design: a `ControlPath` that does not fit
-  a unix socket is **fatal** - `ControlPath too long ... >= 108 bytes`, exit 255, but only
-  after ssh has already connected and authenticated. 107 bytes is the longest that binds
-  on Linux and macOS allows 103; the new
+  a unix socket is **fatal** - `ControlPath too long ... >= 108 bytes`, exit 255, no connection
+  attempted. 107 bytes is the longest that binds on Linux and macOS allows 103
+  (corrected 2026-09-01: the usable ceiling is 90 on Linux, not 107 - ssh binds a
+  17-byte temporary path first; see [2026090112]); the new
   location costs about 18 bytes more than `/tmp`, and an ordinary destination (a six-letter
   account, a 38-character FQDN, port 22) lands near 87. Falling back to `/tmp` for a longer
   one was rejected: it would restore the exposure silently, in the one case nobody watches.

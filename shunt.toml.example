@@ -17,13 +17,8 @@ web-02 = "user@203.0.113.20"
 
 # control_master - reuse one ssh connection for the whole session. Default: true.
 #
-# The socket that makes reuse possible is a file, and before binding it ssh writes a
-# temporary path 17 bytes longer and renames it into place - so the usable limit is not
-# the platform's raw socket-path size but that size minus 17: 90 bytes on Linux, 86 on
-# macOS. The path is built from:
-#     /tmp/shunt-cm-  +  session id (36)  +  "-"  +  user@host:port  +  .sock
-# A long host name eats the rest: ssh connects and authenticates, then fails to bind the
-# socket (exit 255) - a failure that reads like an unreachable machine.
+# A very long host name can make the connection-reuse socket path too long for a unix
+# socket - reuse then breaks, and the failure can read like the host being unreachable.
 #
 # control_master = false for such a host: commands still run, each paying its own
 # handshake. Nothing of the security changes - the encryption and the authentication are

@@ -531,14 +531,10 @@ word. A broken config is loud rather than empty: the CLI says what is wrong with
 instead of resolving to no hosts.
 
 A host can also turn off ssh's connection-reuse socket with `control_master = false`
-(default `true`). The socket that makes reuse possible is a file, and before binding it
-ssh writes a temporary path 17 bytes longer and renames it into place - so the usable
-limit is not the platform's raw socket-path size but that size minus 17: 90 bytes on
-Linux, 86 on macOS. A long host name can eat the whole budget: ssh connects and
-authenticates, then fails to bind the socket (exit 255) - a dead end that reads exactly
-like an unreachable host, though the true cause is right there in ssh's own error line.
-`control_master = false` runs every command on that host without reuse (each pays its own
-ssh handshake) instead. See `shunt.toml.example` for the exact byte math.
+(default `true`). A long host name can make that socket's path too long for a unix socket
+- a dead end that reads exactly like an unreachable host, though the true cause is right
+there in ssh's own error line. `control_master = false` runs every command on that host
+without reuse (each pays its own ssh handshake) instead.
 
 An optional `[audit]` section tunes the audit log:
 

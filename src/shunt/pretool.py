@@ -1375,16 +1375,9 @@ def ssh_opts(host, sid):
     return opts
 
 
-# Before ssh binds this socket it first creates a TEMPORARY path - the real one plus "."
-# and 16 random characters (17 bytes) - and renames it into place once the bind succeeds.
-# That 17-byte cost is paid even though the final path never carries it, so the ceiling
-# this hook can actually use is 17 less than the platform's own limit: 90 bytes on Linux
-# (107 - 17), 86 on macOS (103 - 17).
-#
-# Warning at the tighter of the two - macOS's 86 - means the same host looks the same on
-# both, instead of working for whoever tests on Linux and failing the moment someone with
-# the same shunt.toml is on a Mac.
-CONTROL_SOCKET_MAX = 86  # macOS: 103 for sun_path minus 17 for ssh's temporary suffix
+CONTROL_SOCKET_MAX = 86  # 103 (macOS sun_path) minus 17 for the temporary path ssh binds
+# before renaming. Measured on OpenSSH 9.6p1: 90 is the last that
+# binds on Linux, 91 is not; the macOS figure is derived, not measured.
 
 
 def _control_socket_length(sid, target):
@@ -1415,13 +1408,9 @@ def _control_socket_notice(host, sid, alias):
     if length <= CONTROL_SOCKET_MAX:
         return ""
     return (
-        f"\n⚠ shunt: @{alias} - the connection-reuse socket path would be {length} bytes. Before "
-        "binding, ssh adds a 17-byte temporary suffix and renames, so the usable ceiling is 90 on "
-        "Linux and about 86 on macOS. Past it ssh connects and authenticates, then fails before "
-        "running the command (exit 255) - and the transport line reads that as an unreachable host. "
-        f'The path is /tmp/shunt-cm- + the {len(sid)}-byte session id + "-" + {host["target"]}:22 + '
-        ".sock. Use the IP instead of the long name, or set `control_master = false` for this host "
-        "in shunt.toml."
+        f"\n⚠ shunt: @{alias} - the connection-reuse socket path for this host is {length} bytes, "
+        "past what a unix socket allows. Use the IP instead of the host name; if you cannot, set "
+        "`control_master = false` for this host in shunt.toml."
     )
 
 

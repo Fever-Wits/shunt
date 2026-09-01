@@ -258,9 +258,9 @@ drift apart.
   CLI has no such part in its name - it must stay predictable, because the whole
   value of a muxed socket is that the *next* `shunt` call finds the master the
   last one left - so its **place** carries the privacy instead. A `ControlPath`
-  too long for a unix socket is fatal (ssh exits 255, but only after connecting
-  and authenticating), which makes the directory a budget: an ordinary
-  destination lands near 87 bytes of the 103 the strictest platform allows.
+  too long for a unix socket is fatal, which makes the directory a budget: an
+  ordinary destination lands near 87 bytes, close to the ceiling measured on
+  Linux (90; test_ssh_opts pins it).
 - **`BatchMode=yes` / `StrictHostKeyChecking=accept-new`** keep it
   non-interactive and first-connect-friendly.
 
@@ -861,3 +861,12 @@ Collected in one place, because each is a boundary rather than a pending fix:
 - **A host with no `python3` cannot be edited** - `edit` and `commit` are
   unavailable there; the shell's own `command not found` comes back with a line
   from shunt naming what it costs. Everything else about that host works (Sec. 7).
+- **The macOS ceiling (86 bytes) for the socket-length warning is derived, not
+  measured.** Only Linux is measured (90, OpenSSH 9.6p1) - a macOS host near the
+  edge may not behave exactly as the number promises (Sec. 4).
+- **The CLI (`shunt run` / `read` / `edit` / `cp`) carries no `control_master`
+  switch and no warning** for that same limit - its socket lives elsewhere and
+  reuse can stop working there with nothing said (Sec. 6).
+- **An ordinary destination already crosses that ceiling on macOS** - a user name
+  plus a 38-character FQDN puts the CLI's own socket over the macOS budget today,
+  and there is no opt-out flag for that path yet (Sec. 6).

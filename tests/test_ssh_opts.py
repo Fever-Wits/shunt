@@ -307,10 +307,10 @@ class TestTheSocketLeftTmp(unittest.TestCase):
 
     def test_the_name_leaves_room_for_a_real_destination(self):
         """ssh expands %r/%h/%p and then REFUSES a path that does not fit a unix socket:
-        "ControlPath too long ... >= 108 bytes", exit 255 - but only after ssh has already
-        connected and authenticated; the failure is at the socket bind, not the network.
-        Fatal, not a fallback. Measured: 107 bytes bind on Linux, macOS allows 103. So the name is a
-        budget, and this is what it still has to buy after the move."""
+        "ControlPath too long ... >= 108 bytes". Measured: 90 bytes is the longest that
+        binds on Linux (OpenSSH 9.6p1) - ssh binds a 17-byte temporary path first, so the
+        usable ceiling is 17 less than the platform limit. So the name is a budget, and
+        this is what it still has to buy after the move."""
         base = "/run/user/1000/shunt"  # the preferred base, as a Linux system hands it out
         expanded = (
             shunt_mod.SOCK_NAME.replace("%r", "deploy")
@@ -318,7 +318,13 @@ class TestTheSocketLeftTmp(unittest.TestCase):
             .replace("%p", "22")
         )
         whole = os.path.join(base, expanded)
-        self.assertLessEqual(len(whole), 103, "%d bytes - too long for a unix socket on macOS" % len(whole))
+        self.assertLessEqual(len(whole), 90, "%d bytes - too long for ssh to bind on Linux" % len(whole))
+
+    def test_control_socket_max_plus_the_temporary_path_still_fits(self):
+        """CONTROL_SOCKET_MAX is the hook's own budget, not the raw platform limit - it must
+        still leave room for the 17-byte temporary path ssh binds before renaming, or the
+        constant itself is wrong no matter what any single host measures."""
+        self.assertLessEqual(pretool.CONTROL_SOCKET_MAX + 17, 103)
 
     # -- best-effort ------------------------------------------------------------
 

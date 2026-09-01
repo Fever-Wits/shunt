@@ -1,9 +1,8 @@
 """
 Tests for control_master (shunt.config, shunt.pretool) - the per-host switch for ssh's
-connection-reuse socket, and the ONE thing it protects against: a ControlPath long enough
-that ssh connects and authenticates, then refuses to bind the socket (exit 255) - a
-failure that then reads exactly like the host being down (measured, see the report that
-started this).
+connection-reuse socket, and the ONE thing it protects against: a ControlPath too long to
+fit a unix socket - a failure that then reads exactly like the host being down (measured,
+see the report that started this).
 
 Coverage:
   - shunt.toml reads `control_master`: absent -> true, explicit true, explicit false,
@@ -90,6 +89,12 @@ class TestControlMasterConfig(unittest.TestCase):
             )
             self.assertFalse(c.resolve("a")["control_master"])
             self.assertTrue(c.resolve("b")["control_master"])
+
+    def test_control_master_as_a_string_raises(self):
+        with TmpConf() as c:
+            c.write("shunt.toml", '[hosts]\nh1 = { target = "root@203.0.113.1", control_master = "false" }\n')
+            with self.assertRaises(ValueError):
+                c.resolve("h1")
 
 
 # -- ssh_opts: what control_master actually changes ------------------------------
@@ -210,7 +215,7 @@ class TestControlSocketNotice(unittest.TestCase):
         target = self._target_for_total(pretool.CONTROL_SOCKET_MAX + 1)
         host = {"alias": "h", "target": target, "key": None}
         notice = pretool._control_socket_notice(host, self.SID36, "h")
-        self.assertIn("connection-reuse socket path would be", notice)
+        self.assertIn("connection-reuse socket path for this host is", notice)
         self.assertIn("@h", notice)
 
     def test_silent_at_exactly_the_limit(self):
@@ -298,7 +303,7 @@ class TestNoticeFiresOnceAtSwitch(unittest.TestCase):
     def test_the_switch_carries_the_warning(self):
         with HookConf() as c:
             out = c.run("@long", self.SID)
-            self.assertIn("connection-reuse socket path would be", out)
+            self.assertIn("connection-reuse socket path for this host is", out)
             self.assertIn("@long", out)
 
     def test_the_byte_count_matches_the_formula(self):

@@ -154,12 +154,12 @@ def control_path():
     report it would be before every single CLI call.
 
     ⚠ Length. ssh expands %r/%h/%p and then REFUSES a path that does not fit a unix socket -
-    "ControlPath too long ... >= 108 bytes", exit 255, but only after connecting and
-    authenticating: fatal, not a fallback. Measured: 107 bytes is the longest path that
-    binds on Linux, macOS allows 103.
+    "ControlPath too long ... >= 108 bytes". Measured: 90 bytes is the longest path that
+    binds on Linux (OpenSSH 9.6p1) - ssh binds a 17-byte temporary path first, so the
+    usable ceiling is 17 less than the platform limit (test_ssh_opts pins it).
     The move spent ~18 bytes against /tmp, and a destination of ordinary size - a six-letter
-    account, a 38-character FQDN, port 22 - lands around 87, so ~16 are left even on macOS
-    (test_ssh_opts pins that budget). A destination long enough to spend the rest fails
+    account, a 38-character FQDN, port 22 - lands around 87, close enough to the ceiling
+    that ordinary names can cross it. A destination long enough to spend the rest fails
     LOUDLY, in ssh's own words; a fallback to /tmp for that case would quietly restore the
     very exposure this function ends.
     """
