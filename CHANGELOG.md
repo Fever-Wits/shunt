@@ -28,16 +28,20 @@ connection outright, and the failure read as the host being down.
 ### Fixed
 
 - **A long host name no longer misdiagnoses as an unreachable machine.** The socket that
-  makes ssh's connection reuse possible is a file, and a unix socket path has a hard limit
-  - 103 bytes on macOS, 107 on Linux - built from `/tmp/shunt-cm-` + the 36-byte session id
-  + `user@host:port` + `.sock`. A host name long enough to exceed it made ssh refuse the
-  connection outright (exit 255, nothing attempted), and the transport epilogue then read
-  that as "`@alias` is down or unreachable" - a diagnosis for a machine that was never
-  asked. The switch now measures the path itself and, past the limit, says the true cause
-  instead: use the IP in place of the long name, or set `control_master = false` for that
-  host in `shunt.toml` - every command then runs there without connection reuse (each pays
-  its own ssh handshake, roughly 25x slower on repeats). Default is `true`; nothing changes
-  for a host whose path already fits.
+  makes ssh's connection reuse possible is a file, and before binding it ssh writes a
+  temporary path 17 bytes longer than the real one and renames it into place - so the
+  usable limit is not the platform's raw socket-path size but that size minus 17: 90 bytes
+  on Linux, 86 on macOS. The path is built from `/tmp/shunt-cm-` + the session id (36
+  bytes) + `-` + `user@host:port` + `.sock`. A host name long enough to exceed it made ssh
+  connect, authenticate, and only then fail to bind the socket (exit 255), and the
+  transport epilogue then read that as "`@alias` is down or unreachable" - a diagnosis for
+  a machine that had already answered. The switch now measures the path itself and, past
+  the limit, says the true cause instead: use the IP in place of the long name, or set
+  `control_master = false` for that host in `shunt.toml` - every command then runs there
+  without connection reuse (each pays its own ssh handshake). Default is `true`; nothing
+  changes for a host whose path already fits. This covers bash through the hook; `shunt
+  run` / `read` / `edit` to the same host can still hit the limit, with no notice - the
+  CLI keeps its own socket and has no flag yet.
 
 ## [2026083009] - 2026-08-30
 
@@ -162,8 +166,9 @@ Entries that change behaviour you may have relied on are marked ⚠.
   created, commands still run - what is lost is connection reuse, not the command.
 
   Measured while moving it, because it decides the design: a `ControlPath` that does not fit
-  a unix socket is **fatal** - `ControlPath too long ... >= 108 bytes`, exit 255, no connection
-  attempted. 107 bytes is the longest that binds on Linux and macOS allows 103; the new
+  a unix socket is **fatal** - `ControlPath too long ... >= 108 bytes`, exit 255, but only
+  after ssh has already connected and authenticated. 107 bytes is the longest that binds
+  on Linux and macOS allows 103; the new
   location costs about 18 bytes more than `/tmp`, and an ordinary destination (a six-letter
   account, a 38-character FQDN, port 22) lands near 87. Falling back to `/tmp` for a longer
   one was rejected: it would restore the exposure silently, in the one case nobody watches.

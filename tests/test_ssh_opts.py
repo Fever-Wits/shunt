@@ -174,7 +174,7 @@ class TestHookControlPath(unittest.TestCase):
     def test_the_hook_and_the_cli_carry_the_same_options(self):
         """The socket was only ONE of the things these two copies must agree on.
 
-        pretool.ssh_opts does not import the CLI's (that would cost ~13 ms on every bash
+        pretool.ssh_opts does not import the CLI's (that would cost an import on every bash
         command of the session), so a test is the only thing holding them together - and
         until now it compared the socket NAME alone. An option added to one side and not
         the other passed straight through: the probe would then test a path the command
@@ -202,6 +202,24 @@ class TestHookControlPath(unittest.TestCase):
 
         host = {"alias": "h", "target": "root@203.0.113.1", "key": None}
         self.assertEqual(names(pretool.ssh_opts(host, "sess-1")), names(shunt_mod.ssh_opts(host)))
+
+
+# -- keeping _control_socket_length aligned with ssh_opts ------------------------
+
+
+class TestControlSocketLengthMatchesSshOpts(unittest.TestCase):
+    """_control_socket_length expands %r/%h/%p itself instead of importing ssh_opts' own
+    string (see that function's docstring, which names THIS file as what holds the two
+    together) - so this is the test that has to exist for that claim to be true.
+    """
+
+    def test_expanded_controlpath_length_matches_the_separate_calculation(self):
+        sid = "1" * 36
+        target = "root@203.0.113.1"
+        host = {"alias": "h", "target": target, "key": None}
+        opt = next(o for o in pretool.ssh_opts(host, sid) if o.startswith("ControlPath="))
+        expanded = opt[len("ControlPath=") :].replace("%r@%h:%p", f"{target}:22")
+        self.assertEqual(len(expanded), pretool._control_socket_length(sid, target))
 
 
 # -- where the CLI's socket lives -----------------------------------------------
@@ -289,8 +307,9 @@ class TestTheSocketLeftTmp(unittest.TestCase):
 
     def test_the_name_leaves_room_for_a_real_destination(self):
         """ssh expands %r/%h/%p and then REFUSES a path that does not fit a unix socket:
-        "ControlPath too long ... >= 108 bytes", exit 255, nothing attempted - fatal, not a
-        fallback. Measured: 107 bytes bind on Linux, macOS allows 103. So the name is a
+        "ControlPath too long ... >= 108 bytes", exit 255 - but only after ssh has already
+        connected and authenticated; the failure is at the socket bind, not the network.
+        Fatal, not a fallback. Measured: 107 bytes bind on Linux, macOS allows 103. So the name is a
         budget, and this is what it still has to buy after the move."""
         base = "/run/user/1000/shunt"  # the preferred base, as a Linux system hands it out
         expanded = (

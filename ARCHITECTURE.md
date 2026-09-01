@@ -258,9 +258,9 @@ drift apart.
   CLI has no such part in its name - it must stay predictable, because the whole
   value of a muxed socket is that the *next* `shunt` call finds the master the
   last one left - so its **place** carries the privacy instead. A `ControlPath`
-  too long for a unix socket is fatal (ssh exits 255 without connecting), which
-  makes the directory a budget: an ordinary destination lands near 87 bytes of
-  the 103 the strictest platform allows.
+  too long for a unix socket is fatal (ssh exits 255, but only after connecting
+  and authenticating), which makes the directory a budget: an ordinary
+  destination lands near 87 bytes of the 103 the strictest platform allows.
 - **`BatchMode=yes` / `StrictHostKeyChecking=accept-new`** keep it
   non-interactive and first-connect-friendly.
 

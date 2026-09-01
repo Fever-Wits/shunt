@@ -16,13 +16,14 @@ always "use stdlib."
 ## ASCII-only source
 
 **The source is ASCII**, with one deliberate exception: `U+26A0` (WARNING SIGN),
-`U+2713` (CHECK MARK) and `U+2139` (INFORMATION SOURCE) inside messages the tool
-*emits* to the reading model -- these are signal glyphs: attention cues the model
-acts on, not decoration. The rule is by role, not by character: a glyph that
-carries a cue -- in an emitted message, a comment or a docstring alike -- is kept
-and added to this list. What is spelled out instead is decoration: a glyph used as
-a bullet, a separator or a flourish, where the word loses nothing. A test input that genuinely needs a non-ASCII character is written as a
-`\uXXXX` escape, with a word saying which Unicode property it exercises.
+`U+2713` (CHECK MARK) and `U+2139` (INFORMATION SOURCE), wherever they carry a cue
+to the reading model -- these are signal glyphs: attention cues the model acts on,
+not decoration. The rule is by role, not by character: a glyph that carries a cue
+-- in an emitted message, a comment or a docstring alike -- is kept and added to
+this list. What is spelled out instead is decoration: a glyph used as a bullet, a
+separator or a flourish, where the word loses nothing. A test input that
+genuinely needs a non-ASCII character is written as a `\uXXXX` escape, with a
+word saying which Unicode property it exercises.
 
 | glyph | code point | Unicode name | what it looks like | what it tells the reading model |
 | --- | --- | --- | --- | --- |

@@ -595,7 +595,7 @@ def warn_if_off_mode(tool, sid, tool_input=None):
             # one Grep would spend it and the next agent would be born into silence. What
             # it inherits is worse than a wrong disk, too: while the routing is unreadable
             # main() refuses every bash command, so the agent works with no bash at all.
-            # -> and no note into the child's prompt here, unlike the remote case below:
+            # Guard: no note into the child's prompt here, unlike the remote case below:
             # this state ANNOUNCES itself to the child at once - its very first bash
             # command comes back refused, with the two ways out named. The remote state is
             # the silent one, where commands succeed on a machine nobody mentioned.
@@ -1181,7 +1181,7 @@ def _probe_line(host, sid, alias):
     detail, which comes from ssh itself. A cause guessed in the loudest line sends the
     reader to look in the wrong place.
 
-    -> The price of asking, said plainly: `@alias` used to take milliseconds and now takes
+    Guard: the price of asking, said plainly: `@alias` used to take milliseconds and now takes
       as long as the probe does, up to PROBE_DEADLINE. A session interrupted inside that
       window gets no message at all while the routing IS already written - the switch is
       recorded before the probe for exactly that reason, and the armed ticket is what
@@ -1274,7 +1274,7 @@ def _remote_script(cmd, sid, housekeeping=False):
     the trap will do, out loud when it fails. A line on every command would be wallpaper,
     and wallpaper is silent exactly when it needs to speak (the same budget the file-tool
     warning is kept on, see _warned_before).
-    -> the price, said plainly: a home that becomes unwritable MID-session is not reported
+    Guard: the price, said plainly: a home that becomes unwritable MID-session is not reported
       until the next switch. Nothing here can see the far side between commands - the hook
       builds the command, it never sees what came back.
 
@@ -1338,7 +1338,7 @@ def ssh_opts(host, sid):
 
     The THIRD copy of this knowledge is the CLI's own ssh_opts (cli.py). The CLI imports this
     file, so importing it back would load a second copy of this module - it resolves today
-    only because the hook runs as `__main__`, and costs ~13 ms on every hook run besides.
+    only because the hook runs as `__main__`, and would cost an import on every hook run besides.
     The two are kept aligned by tests
     instead (tests/test_ssh_opts.py), which is also where the socket's `%r` was found missing.
     TWO of them, because the socket is not the whole of what has to match:
@@ -1375,11 +1375,16 @@ def ssh_opts(host, sid):
     return opts
 
 
-# The tighter of the two limits ssh is refused at - 103 bytes on macOS, 107 on Linux (see
-# ssh_opts above). Warning at the tighter one means the same host looks the same on both,
-# instead of working for whoever tests on Linux and failing the moment someone with the
-# same shunt.toml is on a Mac.
-CONTROL_SOCKET_MAX = 103
+# Before ssh binds this socket it first creates a TEMPORARY path - the real one plus "."
+# and 16 random characters (17 bytes) - and renames it into place once the bind succeeds.
+# That 17-byte cost is paid even though the final path never carries it, so the ceiling
+# this hook can actually use is 17 less than the platform's own limit: 90 bytes on Linux
+# (107 - 17), 86 on macOS (103 - 17).
+#
+# Warning at the tighter of the two - macOS's 86 - means the same host looks the same on
+# both, instead of working for whoever tests on Linux and failing the moment someone with
+# the same shunt.toml is on a Mac.
+CONTROL_SOCKET_MAX = 86  # macOS: 103 for sun_path minus 17 for ssh's temporary suffix
 
 
 def _control_socket_length(sid, target):
@@ -1410,11 +1415,13 @@ def _control_socket_notice(host, sid, alias):
     if length <= CONTROL_SOCKET_MAX:
         return ""
     return (
-        f"\n⚠ shunt: @{alias} - the connection-reuse socket path would be {length} bytes, over the 103 a "
-        "unix socket allows on macOS. It is /tmp/shunt-cm- + the 36-byte session id + "
-        f"{host['target']}:22 + .sock. ssh refuses such a path outright (exit 255), and the failure then "
-        "looks like an unreachable host. Use the IP instead of the long name, or set "
-        "`control_master = false` for this host in shunt.toml - commands then run without connection reuse."
+        f"\n⚠ shunt: @{alias} - the connection-reuse socket path would be {length} bytes. Before "
+        "binding, ssh adds a 17-byte temporary suffix and renames, so the usable ceiling is 90 on "
+        "Linux and about 86 on macOS. Past it ssh connects and authenticates, then fails before "
+        "running the command (exit 255) - and the transport line reads that as an unreachable host. "
+        f'The path is /tmp/shunt-cm- + the {len(sid)}-byte session id + "-" + {host["target"]}:22 + '
+        ".sock. Use the IP instead of the long name, or set `control_master = false` for this host "
+        "in shunt.toml."
     )
 
 
@@ -1454,10 +1461,10 @@ def probe_host(host, sid):
     time the next command runs - and nothing here depends on it: an unused master closes
     itself after ControlPersist.
 
-    subprocess and tempfile are imported HERE, not at the top: measured, the two cost
-    ~15 ms of import on every run of this hook - that is every bash command of the session
-    - and this function runs on a switch. The rest of the file is deliberately cheap for
-    the same reason (see audit).
+    subprocess and tempfile are imported HERE, not at the top: importing them costs real
+    time on every run of this hook - that is every bash command of the session - so the
+    cost is deferred to here, where it is paid only on a switch, not on every command. The
+    rest of the file is deliberately cheap for the same reason (see audit).
     """
     import subprocess
     import tempfile

@@ -161,6 +161,8 @@ def _load_toml(path):
             raise ValueError(
                 f'{path}: host "{alias}" must be "user@host" or {{ target = "user@host", key = "~/.ssh/id" }}'
             )
+        if not isinstance(control_master, bool):
+            raise ValueError(f'{path}: host "{alias}" control_master must be true or false, not {control_master!r}')
         hosts[alias] = _host(alias, target, key, control_master)
     return hosts
 

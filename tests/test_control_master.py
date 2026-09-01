@@ -1,8 +1,9 @@
 """
 Tests for control_master (shunt.config, shunt.pretool) - the per-host switch for ssh's
 connection-reuse socket, and the ONE thing it protects against: a ControlPath long enough
-that ssh refuses the connection outright (exit 255, no attempt at all) - a failure that
-then reads exactly like the host being down (measured, see the report that started this).
+that ssh connects and authenticates, then refuses to bind the socket (exit 255) - a
+failure that then reads exactly like the host being down (measured, see the report that
+started this).
 
 Coverage:
   - shunt.toml reads `control_master`: absent -> true, explicit true, explicit false,
@@ -11,8 +12,10 @@ Coverage:
     and asks for nothing else instead - the only difference is those three
   - -i, BatchMode and StrictHostKeyChecking are asked for either way
   - the ControlPath length is computed correctly - pinned against the exact byte counts
-    named in the report (root@192.168.198.84 -> 78, ... -> 102, ... -> 104)
-  - the "socket would not fit" warning fires only ABOVE 103 bytes, never AT 103, and only
+    named in the report (root@192.168.198.84 -> 78, ... -> 102, ... -> 104); none of these
+    three sits near the real limit (86 on macOS, 90 on Linux) - they are arithmetic pins,
+    not boundary cases
+  - the "socket would not fit" warning fires only ABOVE the limit, never AT it, and only
     while control_master is (still) true
   - end-to-end through the hook: the warning rides on the SWITCH message once, never on
     the commands that follow, and disappears entirely when control_master = false
@@ -166,24 +169,32 @@ class TestSshOptsRespectsControlMaster(unittest.TestCase):
 
 
 class TestControlSocketLength(unittest.TestCase):
-    """Pinned against the byte counts measured for the report that started this."""
+    """Pinned against the byte counts measured for the report that started this.
+
+    Neither FQDN target below sits near the real limit (86 on macOS, 90 on Linux) - they
+    only looked like a boundary pair ("at the edge" / "just over") back when the limit was
+    thought to be 103. Both are arithmetic pins on `_control_socket_length` now, not
+    boundary cases; TestControlSocketNotice below computes the real boundary off
+    CONTROL_SOCKET_MAX itself, so it moves with the constant.
+    """
 
     SID36 = "a" * 36  # a real session id is a 36-character UUID
 
     def test_matches_the_measured_short_target(self):
         self.assertEqual(pretool._control_socket_length(self.SID36, "root@192.168.198.84"), 78)
 
-    def test_matches_the_measured_target_at_the_edge(self):
+    def test_matches_the_measured_long_fqdn_target(self):
         length = pretool._control_socket_length(self.SID36, "root@web-01.eu-central.internal.example.com")
         self.assertEqual(length, 102)
 
-    def test_matches_the_measured_target_just_over(self):
+    def test_matches_the_measured_longer_fqdn_target(self):
         length = pretool._control_socket_length(self.SID36, "deploy@web-01.eu-central.internal.example.com")
         self.assertEqual(length, 104)
 
 
 class TestControlSocketNotice(unittest.TestCase):
-    """The `>103, not at 103` boundary, and the two ways it can be silenced."""
+    """The `>CONTROL_SOCKET_MAX, not at it` boundary (86 today), and the two ways it can
+    be silenced."""
 
     SID36 = "a" * 36
 
@@ -280,8 +291,8 @@ class HookConf:
 
 
 class TestNoticeFiresOnceAtSwitch(unittest.TestCase):
-    # A real session id is a 36-character UUID - the report's math (and the message's own
-    # wording, "the 36-byte session id") assumes exactly that length.
+    # A real session id is a 36-character UUID; the length the message reports is taken
+    # from the id in hand, so a shorter or longer one stays true.
     SID = "1" * 36
 
     def test_the_switch_carries_the_warning(self):
