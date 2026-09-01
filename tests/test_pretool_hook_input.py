@@ -314,7 +314,7 @@ class TestARefusalCarriesOnlyTheCommand(unittest.TestCase):
     sentence into a background task while the caller reads "Command running in background"
     and believes their line is on its way.
 
-    WARNING: This class is a PARACHUTE, not a proof: it passed before the fix too, because the old
+    ⚠ This class is a PARACHUTE, not a proof: it passed before the fix too, because the old
     code named only `command` everywhere. Its role is to hold the line that the fix must
     NOT cross - the day someone hands `tool_input` to echo() as well, this is what says no.
     """

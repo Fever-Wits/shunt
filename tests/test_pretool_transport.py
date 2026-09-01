@@ -20,7 +20,7 @@ Two things it must not do, and both are tested here:
   255 must leave both streams exactly as they were - noise here is noise everywhere, and
   wallpaper is silent precisely when it needs to be read.
 
-WARNING: The shell decides here, not the assertion: these run the epilogue through a real bash
+⚠ The shell decides here, not the assertion: these run the epilogue through a real bash
 and read the real exit code and the real stderr. A test that only grepped the string would
 pass just as happily on shell that does not parse.
 """

@@ -28,7 +28,7 @@ Coverage:
     around - a ControlPersist master that backgrounds itself holding our descriptors
   - the probe's own output cannot corrupt the hook's, which is a JSON protocol on stdout
 
-WARNING: No test here opens a real connection. The address is not ours to knock on, and a suite
+⚠ No test here opens a real connection. The address is not ours to knock on, and a suite
 that reaches the network is a suite whose result depends on somebody else's router.
 """
 
@@ -423,7 +423,7 @@ class TestTheProbeCannotHangTheHook(unittest.TestCase):
         (five minutes) and the deadline would fire on the healthiest case there is: a host
         that answered on the very first connection.
 
-        WARNING: The background job must NOT redirect its own streams. A stub written as
+        ⚠ The background job must NOT redirect its own streams. A stub written as
         `sleep 30 >/dev/null 2>&1 &` inherits nothing and the test passes on a pipe-based
         probe as readily as on this one - measured: 0.00s either way. Bare `&` is what
         makes it hold our descriptors, and then a pipe-based probe times out (measured:

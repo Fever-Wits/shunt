@@ -15,6 +15,20 @@ web-02 = "user@203.0.113.20"
 # the default above:
 # special = { target = "user@203.0.113.30", key = "~/.ssh/id_ed25519_special" }
 
+# control_master - reuse one ssh connection for the whole session. Default: true.
+#
+# The socket that makes reuse possible is a file, and a unix socket path has a hard
+# limit - 103 bytes on macOS, 107 on Linux. The path is built from:
+#     /tmp/shunt-cm-  +  session id (36)  +  user@host:port  +  .sock
+# A long host name eats the rest, and ssh then refuses to connect at all (exit 255) -
+# a failure that reads like an unreachable machine.
+#
+# control_master = false for such a host: commands still run, each paying its own
+# handshake (~25x slower on repeats). Nothing of the security changes - the encryption
+# and the authentication are ssh's, and the socket in /tmp simply stops existing.
+#
+# Usually the better fix is the IP instead of a long FQDN.
+
 # No `key` anywhere? Then ssh chooses the identity itself, as it always did.
 #
 # `shunt install user@host [--alias NAME] [--key PATH]` writes an entry here for you

@@ -215,7 +215,7 @@ class TestTheHelpersStayParseableAtTheFloor(unittest.TestCase):
     only tests that notice, and it takes THREE of them: no one mechanism is whole, and the
     third exists because the first two shared a hole (see below).
 
-    WARNING: And the three TOGETHER still have one, named here rather than left to be discovered:
+    ⚠ And the three TOGETHER still have one, named here rather than left to be discovered:
     parentheses around several context managers - `with (open(a) as x, open(b) as y):` -
     are 3.9, and invisible to all of it. `feature_version` does not gate them at any level,
     the node is an ordinary `With`, and the parentheses do not survive into the AST at all.

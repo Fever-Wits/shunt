@@ -71,7 +71,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the details.
 suspicion; each one exists because a specific silence cost somebody a specific thing, and
 the cheapest fix was a sentence.
 
-WARNING: **Know what "refuses" means here.** With the two exceptions named below, the hook does not
+⚠ **Know what "refuses" means here.** With the two exceptions named below, the hook does not
 deny the tool call. It replaces your command with an `echo` of the reason, so **the call
 succeeds - exit 0, the reason on stdout** - and nothing runs on either machine. It is built that way on purpose: the hook
 should never raise (a traceback in front of every bash command is worse than anything it
@@ -110,7 +110,7 @@ exit code.
 | **The child is told where it stands** | A spawned agent's prompt arrives with a short frame appended: that a hook routes its bash to `@<alias>`, that its own file tools are **not** routed and stay on the local disk, and that `@local` is one session-wide setting shared with its parent and with any agent working beside it - so switching is never a private choice. Two cases drop the frame and send the parent's warning alone: an `Agent` input with no string prompt, and a reply that would exceed **9000** characters - a brief long enough to overflow it costs a note, never a warning. |
 | **The parent is warned on every spawn** | Spawning while remote warns the parent that the child inherits the mode and will read absent local files as facts. No budget, no once-per-session: each spawn is a new agent that has been told nothing, and a budget shared with the file tools would let one `Grep` silence it. When the routing cannot be read at all, the **parent** hears something sharper - that the child's bash will be **refused** until the routing is settled. Nothing is appended to the child's prompt in that case, deliberately: unlike the remote state, this one announces itself to the child on its very first bash command, which comes back refused with both ways out named. |
 | **File tools say they stayed home** | `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Grep` and `Glob` keep working on the **local** disk while the session feels remote. One line, once per host per session, names both remedies - `Grep` is called often enough that a line per call would become wallpaper, and wallpaper is silent exactly when it should speak. `@local` clears that budget, so coming back to the same host warns you again. `Grep` and `Glob` are on the list for the agent rather than for you: a person searching a machine types `grep` into bash and the hook sends it to the right place, while an agent reaches for the tool. |
-| **Exit codes mean what they say** | The far side's code comes back through a `trap EXIT` that takes it first and spends it last, so no bookkeeping of shunt's can change what your command returned; `run`, `get`, `bg`, `checkout` and `install` hand a remote code straight back instead of flattening it to one number, and `cp` hands back the local `rsync`'s. Where a code *must* be translated, it is because the wire lies: `shunt edit`'s helper answers in JSON and always exits 0 - `not_found`, `ambiguous` and `conflict` included - so shunt reads the status instead and returns 0 only on `ok`. WARNING: `--dry-run` that finds its match is also `ok`, so it too exits 0 without changing anything: `shunt edit ... --dry-run && deploy` deploys. |
+| **Exit codes mean what they say** | The far side's code comes back through a `trap EXIT` that takes it first and spends it last, so no bookkeeping of shunt's can change what your command returned; `run`, `get`, `bg`, `checkout` and `install` hand a remote code straight back instead of flattening it to one number, and `cp` hands back the local `rsync`'s. Where a code *must* be translated, it is because the wire lies: `shunt edit`'s helper answers in JSON and always exits 0 - `not_found`, `ambiguous` and `conflict` included - so shunt reads the status instead and returns 0 only on `ok`. ⚠ `--dry-run` that finds its match is also `ok`, so it too exits 0 without changing anything: `shunt edit ... --dry-run && deploy` deploys. |
 
 ---
 
@@ -530,6 +530,14 @@ machines added on one side, the identity left on the other, and access is gone w
 word. A broken config is loud rather than empty: the CLI says what is wrong with the file
 instead of resolving to no hosts.
 
+A host can also turn off ssh's connection-reuse socket with `control_master = false`
+(default `true`). The socket that makes reuse possible is a file, and a unix socket path
+has a hard limit - 103 bytes on macOS, 107 on Linux; a long host name can eat the whole
+budget, and ssh then refuses to connect at all (exit 255) rather than trying and failing -
+a silent-looking dead end that reads exactly like an unreachable host. `control_master =
+false` runs every command on that host without reuse (each pays its own ssh handshake)
+instead. See `shunt.toml.example` for the exact byte math.
+
 An optional `[audit]` section tunes the audit log:
 
 ```toml
@@ -557,7 +565,7 @@ Nothing is migrated for you; move when you want to, or don't. Should both files 
 | Variable | Used by | Meaning |
 |----------|---------|---------|
 | `SHUNT_CONF` | CLI + hook | Config directory (default `~/.config/shunt`) |
-| `SHUNT_EDIT_MAX_BYTES` | the helpers, **on the server** | Size ceiling, default **64 MiB** (`67108864`). WARNING: It is read in the environment of the **remote** process, and shunt sends no environment over ssh - setting it in your local shell does nothing. Set it for the ssh account on the far host. The two helpers measure different things: for `shunt edit` it caps the **remote file being opened**; for `shunt commit` it caps the **content being sent** - the raw bytes at exactly that number, with an inflated base64 payload rejected even before decoding, at twice it. Neither caps the pull direction - `shunt checkout` fetches whatever is there, so check the size of a big remote file first. Over the ceiling -> use `shunt cp` and edit locally. |
+| `SHUNT_EDIT_MAX_BYTES` | the helpers, **on the server** | Size ceiling, default **64 MiB** (`67108864`). ⚠ It is read in the environment of the **remote** process, and shunt sends no environment over ssh - setting it in your local shell does nothing. Set it for the ssh account on the far host. The two helpers measure different things: for `shunt edit` it caps the **remote file being opened**; for `shunt commit` it caps the **content being sent** - the raw bytes at exactly that number, with an inflated base64 payload rejected even before decoding, at twice it. Neither caps the pull direction - `shunt checkout` fetches whatever is there, so check the size of a big remote file first. Over the ceiling -> use `shunt cp` and edit locally. |
 
 ---
 
@@ -572,7 +580,7 @@ fully encrypted, nothing of shunt's installed on the server. ssh protects the
 channel; it does not protect the machine from its legitimate user - so use a
 dedicated key and the least-privileged account that can do the job.
 
-WARNING: **A rewritten command carries `permissionDecision: allow`.** That is how a `PreToolUse`
+⚠ **A rewritten command carries `permissionDecision: allow`.** That is how a `PreToolUse`
 hook hands a replacement command back, and it means Claude Code does not ask you about the
 bash it is about to run on the far host. If you rely on Bash permission rules or prompts as
 a safety net, they are not the net while a session is routed - the least-privileged remote

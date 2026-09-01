@@ -63,7 +63,7 @@ REWRITE_MARKER = "#shunt-rewritten\n"
 # types `grep`/`find` into bash, which the hook redirects correctly. An agent reaches
 # for the Grep tool instead, gets hits from the local disk, and reads them as facts
 # about the far one - and it reaches for it far more often than for Read.
-# WARNING: A name added here warns nobody on its own: the matcher in settings.json decides
+# ⚠ A name added here warns nobody on its own: the matcher in settings.json decides
 # which tools ever reach the hook. HOOK_MATCHER (cli.py, printed by `shunt install`)
 # is the other half of the same fact.
 LOCAL_DISK_TOOLS = ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Grep", "Glob")
@@ -145,7 +145,7 @@ def block(msg):
     exit 2 and stderr, because that pair is the one channel that asks nothing of the
     input: the JSON reply needs an event name and a decision, and this state is defined by
     not being able to say what is being decided about.
-    WARNING: DOCUMENTED, not measured: a harness cannot be asked to send broken input on purpose,
+    ⚠ DOCUMENTED, not measured: a harness cannot be asked to send broken input on purpose,
       so what is verified here is what this hook WRITES, not what is done with it. If the
       contract were ever not honoured the call would proceed unchanged - the same outcome
       the older silence had, never a worse one.
@@ -341,8 +341,8 @@ def _trim_audit(path, drop_months, ceiling):
     the NEXT trim dates its cut from, so age-trimming would then be dead for good.
 
     Written via a temp file and os.replace, so a crash mid-trim cannot leave half a log.
-    WARNING: What falls out is gone for good.
-    WARNING: Parallel sessions append to one file. Appends are safe; a trim coinciding with
+    ⚠ What falls out is gone for good.
+    ⚠ Parallel sessions append to one file. Appends are safe; a trim coinciding with
     another session's append can lose a line or two. Accepted for an audit trail - said
     plainly so it is not read as a guarantee.
     """
@@ -480,7 +480,7 @@ def _warned_before(sid, alias):
 # what that means for its own two hands (bash goes there, files stay here), and the way
 # out with its price.
 #
-# WARNING: The price is the part measured rather than assumed. The harness hands a child the
+# ⚠ The price is the part measured rather than assumed. The harness hands a child the
 # PARENT's session_id - documented, and visible in the transcripts it writes: every
 # subagent record carries its parent's sessionId, with the agent's own identity in a
 # separate field the hook never sees. Every file this hook keys on - routing, ticket,
@@ -542,7 +542,7 @@ def _tell_the_spawn_and_its_parent(alias, tool_input):
     which machine it is standing on. Sent through one JSON object the way the Bash path
     already sends a rewrite and a notice together.
 
-    WARNING: No permissionDecision, deliberately: this hook has no business granting a spawn that
+    ⚠ No permissionDecision, deliberately: this hook has no business granting a spawn that
     the caller's own permission rules might want to stop - the note is a note, not a pass.
     That form is not documented (every example pairs the two), so it was MEASURED, the way
     emit() was. Verified against the harness (2.1.226): a routed session was given a
@@ -641,13 +641,13 @@ def warn_if_off_mode(tool, sid, tool_input=None):
 # the failure falls to refusal and never to the default, and the default here is HERE.
 # Split on the RAW text, deliberately: a separator inside quotes costs a refusal nobody
 # needed, never a command that leaves unnoticed.
-# WARNING: The boundary, named so it is not read as an oversight: a REDIRECTION (`>` `>>` `2>`
+# ⚠ The boundary, named so it is not read as an oversight: a REDIRECTION (`>` `>>` `2>`
 # `<`) is deliberately NOT in the class. It cannot hide a second command - one still needs
 # a separator that IS in the class - and adding it would refuse the legitimate
 # `shunt read @h /etc/nginx.conf > local.txt`. What a redirection DOES do is silent: its
 # target lands on THIS machine. Which is where the `shunt` CLI runs anyway, so nothing
 # crosses a machine boundary unnoticed - the write is beside the tool that made it.
-# WARNING: The SECOND boundary, and it is the one that gets "fixed" back: a BARE `$` is
+# ⚠ The SECOND boundary, and it is the one that gets "fixed" back: a BARE `$` is
 # deliberately NOT in the class - `$(` is spelled out instead. A `$` on its own is an
 # EXPANSION, and no shell re-splits a command at a `;` that arrived out of one, so it can
 # introduce nothing. What it can do is refuse `shunt read @h "$f"` and
@@ -701,7 +701,7 @@ def _shunt_cli_here_or_refuse(s, sid):
 # blamed on a machine they were not thinking about; and the half BEFORE the pipe has
 # already run over there - `cat` read the far machine's copy of the file, `mysqldump`
 # dumped the far machine's database.
-# WARNING: This is the direction an older comment here called the LOUD one, and loud it is. Loud
+# ⚠ This is the direction an older comment here called the LOUD one, and loud it is. Loud
 # is not the same as clear, and it is not the same as harmless: what fails loudly is the
 # `shunt` half, while the half that already ran did so silently, on the wrong machine.
 # So it is refused, exactly as its mirror is, and for the one reason both share: a line
@@ -824,7 +824,7 @@ def _wants_the_next_word(option, eaters):
 # exists to prevent. The word boundary keeps `> /dev/nullish` - somebody's real file -
 # on the loud side.
 #
-# WARNING: It reads the RAW text, so `echo "a > b"` and `grep "x>y"` warn about a `>` that only
+# ⚠ It reads the RAW text, so `echo "a > b"` and `grep "x>y"` warn about a `>` that only
 # LOOKS like a redirect. Examined 2026-08-10 and left as it is - a decision, not a gap.
 # The clean fix is to blank out the quoted regions before this scan (a small state machine,
 # cheap, and confined to this one line - the command scan below must keep reading the raw
@@ -850,7 +850,7 @@ OVERWRITE_NAME = "> (truncates its target)"
 # exists to prevent. The word boundary keeps `> /dev/nullish` - somebody's real file -
 # on the loud side.
 #
-# WARNING: It reads the RAW text, so `echo "a > b"` and `grep "x>y"` warn about a `>` that only
+# ⚠ It reads the RAW text, so `echo "a > b"` and `grep "x>y"` warn about a `>` that only
 # LOOKS like a redirect. Examined 2026-08-10 and left as it is - a decision, not a gap.
 # The clean fix is to blank out the quoted regions before this scan (a small state machine,
 # cheap, and confined to this one line - the command scan below must keep reading the raw
@@ -936,7 +936,7 @@ def _sweep_stale_markers():
     rides on. On every command this would be a directory listing that deletes nothing,
     several times a minute, for the whole life of the session.
 
-    WARNING: `target.<sid>` is deliberately NOT in the list, and the asymmetry IS the design. The
+    ⚠ `target.<sid>` is deliberately NOT in the list, and the asymmetry IS the design. The
     far side's files are rewritten by every single command, so an old mtime over there
     really does mean a session that is gone. `target.<sid>` is written ONCE, at the switch,
     and never touched again: a session that went to @web-01 five weeks ago and is still
@@ -1040,7 +1040,7 @@ def _spend_switch_marker(sid, expect):
     `expect` is the alias in remote mode and LOCAL_MARK in local mode: one ticket, read by
     whichever side the session is on.
 
-    WARNING: ABSENT and UNREADABLE are THREE states with "ours", not two. Absent is the ordinary
+    ⚠ ABSENT and UNREADABLE are THREE states with "ours", not two. Absent is the ordinary
     command - by far the common case, and it must stay silent. Unreadable (a directory in
     its place, a mode nobody can read) used to fall into the same `except` and answer "not
     armed": the ticket could then never be spent, so the reminder never came, the far
@@ -1137,7 +1137,7 @@ def remote_notice(sid, alias, cmd, armed, unspent, unreadable=""):
     before there is anything to remove - which is what lets the second line point at the
     first one.
 
-    WARNING: `cmd` is the command as the CALLER typed it, never the rewritten one. The rewrite
+    ⚠ `cmd` is the command as the CALLER typed it, never the rewritten one. The rewrite
     carries our own `find ... -delete` on a switch, which irreversible_in() would report as
     the caller's doing - a warning about a command nobody wrote teaches the reader to skip
     the ones that matter.
@@ -1174,7 +1174,7 @@ def _probe_line(host, sid, alias):
     be asked. The last one may not be dressed as either of the others - the hook never
     states what it has not verified.
 
-    WARNING: What the failing line may claim, and what it may not. A failed `ssh ... true` proves
+    ⚠ What the failing line may claim, and what it may not. A failed `ssh ... true` proves
     exactly one thing: THIS CHECK did not get through. It does not prove the host is down -
     a refused key, a changed host key and a broken login shell all answer from a machine
     that is perfectly awake. So the line names what was seen and hands the cause to the
@@ -1218,10 +1218,10 @@ def resolve_host(alias):
 # IN over there, which is routinely not the one running this hook (a local user -> remote
 # root). Expanding it HERE would bake a local home into a remote path - a directory that is not
 # on the far machine - and the state would quietly never be written again.
-# WARNING: Never shlex.quote THIS: single quotes hand `$HOME` over as five literal characters,
+# ⚠ Never shlex.quote THIS: single quotes hand `$HOME` over as five literal characters,
 # and the far shell then makes a directory by that name wherever the command landed. Only
 # the session id is quoted (see _state_file) - it is the part that arrives from outside.
-# WARNING: Not a twin of the ControlMaster socket in ssh_command: that one is a LOCAL file and
+# ⚠ Not a twin of the ControlMaster socket in ssh_command: that one is a LOCAL file and
 # stays in /tmp on purpose. These two look alike and are not.
 # `.cache` and not a state directory of its own: losing this file costs one forgotten
 # `cd`, so being swept by a cache cleaner is exactly the semantics we want.
@@ -1286,7 +1286,7 @@ def _remote_script(cmd, sid, housekeeping=False):
     directory is swept - and it fires ONLY on a real failure: with no state file yet the
     cd goes to $HOME and succeeds, so the ordinary first command after a switch says
     nothing.
-    WARNING: The message says CANNOT BE ENTERED, not "is gone": cd fails just as readily on a
+    ⚠ The message says CANNOT BE ENTERED, not "is gone": cd fails just as readily on a
       directory that still exists - permissions changed, a mount that fell away - and a
       message that names the wrong cause sends the reader looking in the wrong place.
       What is verified here is the cd's failure; the reason is not.
@@ -1324,12 +1324,12 @@ def ssh_opts(host, sid):
     same options or the probe tests a path the command does not take - a green probe over
     a key the command will not use is worth less than no probe at all.
 
-    WARNING: The ControlMaster socket is the one path here that stays in /tmp, and on purpose:
+    ⚠ The ControlMaster socket is the one path here that stays in /tmp, and on purpose:
     it is a LOCAL file, it is meant to die with the machine, and a unix socket path has
     ~104 characters to live in. The cwd state-file is the FAR side's and lives in that
     side's home - see REMOTE_STATE_DIR. The two are not twins.
 
-    WARNING: ...and the CLI's socket LEFT /tmp (cli.py control_path), which makes this an asymmetry
+    ⚠ ...and the CLI's socket LEFT /tmp (cli.py control_path), which makes this an asymmetry
     worth naming rather than a copy that fell behind. What buys the exemption is the `sid`
     below: this name cannot be guessed from outside, so a world-writable directory hands
     nobody a path to sit on first. The CLI's name has no such part - it must stay
@@ -1345,27 +1345,77 @@ def ssh_opts(host, sid):
     `...key_on_the_same_things` compares the socket NAME, and
     `...carry_the_same_options` compares which options are asked of ssh at all. This line
     named only the first for a while and read as though it covered both.
+
+    ⚠ `control_master` (config.py, default true) turns OFF the three options that open and
+    reuse the socket - ControlMaster/ControlPath/ControlPersist - for a host whose
+    ControlPath would not fit a unix socket (see _control_socket_notice below). The rest
+    stay: `-i`, BatchMode and StrictHostKeyChecking answer questions that have nothing to
+    do with reuse, and dropping them would silently change what every OTHER command on
+    that host does, not just the one thing this flag is for.
     """
-    sock = f"/tmp/shunt-cm-{sid}-%r@%h:%p.sock"  # per-session AND PER-DESTINATION
-    # (%r/%h/%p filled in by ssh, same shape as the CLI's) - otherwise @web-01 then @web-02
-    # in the same session share one socket and commands go to the wrong host. %r is the
-    # USER: two aliases onto one machine with different accounts (the config allows it)
-    # would otherwise ride the first one's master and run as the wrong account.
-    opts = [
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-        "-o",
-        "ControlMaster=auto",
-        "-o",
-        "ControlPath=" + sock,
-        "-o",
-        "ControlPersist=300",
-        "-o",
-        "BatchMode=yes",
-    ]
+    opts = ["-o", "StrictHostKeyChecking=accept-new"]
+    if host.get("control_master", True):
+        sock = f"/tmp/shunt-cm-{sid}-%r@%h:%p.sock"  # per-session AND PER-DESTINATION
+        # (%r/%h/%p filled in by ssh, same shape as the CLI's) - otherwise @web-01 then
+        # @web-02 in the same session share one socket and commands go to the wrong host.
+        # %r is the USER: two aliases onto one machine with different accounts (the
+        # config allows it) would otherwise ride the first one's master and run as the
+        # wrong account.
+        opts += [
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            "ControlPath=" + sock,
+            "-o",
+            "ControlPersist=300",
+        ]
+    opts += ["-o", "BatchMode=yes"]
     if host["key"]:
         opts = ["-i", host["key"]] + opts
     return opts
+
+
+# The tighter of the two limits ssh is refused at - 103 bytes on macOS, 107 on Linux (see
+# ssh_opts above). Warning at the tighter one means the same host looks the same on both,
+# instead of working for whoever tests on Linux and failing the moment someone with the
+# same shunt.toml is on a Mac.
+CONTROL_SOCKET_MAX = 103
+
+
+def _control_socket_length(sid, target):
+    """The byte length ssh_opts' ControlPath will be, once ssh fills in %r/%h/%p.
+
+    A SEPARATE calculation from ssh_opts, not a shared one: that function's string still
+    carries the literal, UNRESOLVED %r/%h/%p for ssh itself to expand - this one expands
+    them ourselves, with the target already in hand and the default port (shunt asks for
+    no other). The same duplication ssh_opts already lives with for its CLI twin, and the
+    same fix: kept aligned by a test (tests/test_ssh_opts.py), not by importing across.
+    """
+    return len(f"/tmp/shunt-cm-{sid}-{target}:22.sock")
+
+
+def _control_socket_notice(host, sid, alias):
+    """Warn about a ControlPath too long to bind - "" when there is nothing to say.
+
+    Said ONCE, at the switch (the caller composes this into the same message the switch
+    ticket lands in) - never per command, or a caller stuck on a long host name would read
+    the same paragraph before every single thing they type.
+
+    `control_master = false` silences this outright: ssh_opts then never builds the
+    socket, so there is nothing here for the length to warn about.
+    """
+    if not host.get("control_master", True):
+        return ""
+    length = _control_socket_length(sid, host["target"])
+    if length <= CONTROL_SOCKET_MAX:
+        return ""
+    return (
+        f"\n⚠ shunt: @{alias} - the connection-reuse socket path would be {length} bytes, over the 103 a "
+        "unix socket allows on macOS. It is /tmp/shunt-cm- + the 36-byte session id + "
+        f"{host['target']}:22 + .sock. ssh refuses such a path outright (exit 255), and the failure then "
+        "looks like an unreachable host. Use the IP instead of the long name, or set "
+        "`control_master = false` for this host in shunt.toml - commands then run without connection reuse."
+    )
 
 
 # -- does the far machine answer? ----------------------------------------------
@@ -1394,7 +1444,7 @@ def probe_host(host, sid):
 
     The far side runs `true`: the cheapest thing that proves a shell was reached.
 
-    WARNING: stdout/stderr go to DEVNULL and a FILE - never a pipe. With ControlPersist the
+    ⚠ stdout/stderr go to DEVNULL and a FILE - never a pipe. With ControlPersist the
     master puts itself in the BACKGROUND holding whatever descriptors it inherited, so a
     pipe would keep us reading until it exits (five minutes), and the deadline below would
     fire on the healthiest case there is: a host that answered on the first connection.
@@ -1462,7 +1512,7 @@ def _last_line(text, limit=160):
 # key, auth. It is also what a session gets when the machine goes down mid-work, and
 # there the number is at its most misleading: nothing was delivered, yet the caller reads
 # 255 as a verdict from their own program and goes looking for a bug in it.
-# WARNING: "almost certainly" and not "never ran": a remote command is free to exit 255 on its
+# ⚠ "almost certainly" and not "never ran": a remote command is free to exit 255 on its
 #   own account (rare, but real - ssh does not own the number, it only prefers it), and
 #   this hook does not state what it has not verified.
 TRANSPORT_FAILURE = (
@@ -1599,7 +1649,7 @@ def decide():
     tool_input = data.get("tool_input")
 
     # Bash is the tool that gets REWRITTEN; the rest are matched so the hook can say that
-    # the mode does not cover them. WARNING: Not "only Bash is ever rewritten": an Agent call is
+    # the mode does not cover them. ⚠ Not "only Bash is ever rewritten": an Agent call is
     # handed back with a note written INTO the child's prompt - see
     # _tell_the_spawn_and_its_parent.
     if tool != "Bash":
@@ -1795,6 +1845,7 @@ def decide():
         # arm the one-shot marker: the command AFTER a switch is the one that forgets it,
         # and the one that pays for the far side's housekeeping - see _remote_script
         trouble = _arm_switch_marker(sid, alias)
+        trouble += _control_socket_notice(host, sid, alias)  # once here, never per command
         _sweep_stale_markers()  # the other rare moment - before the probe, which takes seconds
         # ...and ASK the machine, now that the state is settled. Deliberately after the write:
         # the switch is recorded whatever the answer, so a host that is merely booting can
@@ -1921,7 +1972,7 @@ def main():
         needs it, and this path runs approximately never.
       - no once-per-session budget, deliberately: the fault is happening NOW, and the
         budget is a file in a config dir the crash may be about.
-      WARNING: Not covered, and named rather than hidden: if writing the answer itself fails, this
+      ⚠ Not covered, and named rather than hidden: if writing the answer itself fails, this
         exits 1 like any other crash. Nothing is left that could say so.
     """
     try:

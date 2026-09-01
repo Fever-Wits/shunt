@@ -152,7 +152,7 @@ is shared by the whole list, not spent per tool, because a line on every `Grep`
 call would become wallpaper; that is why the one warning names both remedies at
 once (remote file -> `shunt read/edit`, remote search -> `shunt run`).
 
-WARNING: **The list is half the fact.** `LOCAL_DISK_TOOLS` says which tools are warned
+⚠ **The list is half the fact.** `LOCAL_DISK_TOOLS` says which tools are warned
 about; the matcher in `settings.json` says which ever reach the hook at all. A name
 added to one and not the other warns nobody. `HOOK_MATCHER` (`cli.py`, printed by
 `shunt install`) is guarded against the tuple by
@@ -209,7 +209,7 @@ its two hands (bash goes there, file tools stay here), and the way out with its
 price. A bare fact would not carry - an agent reading "you are on @web-01" has no
 reason to think anything follows from it.
 
-WARNING: **The price is measured, not assumed.** The agent host gives a child the
+⚠ **The price is measured, not assumed.** The agent host gives a child the
 PARENT's `session_id`. Every file this hook keys on - routing, ticket, warning
 budget - is therefore ONE slot shared by the parent and by every agent running at
 that moment. `@local` from a child is not a private choice: it moves everybody. A
@@ -396,7 +396,7 @@ session. Going home arms the same ticket - `@local` writes its own mark into it 
 and the first command after that gets the mirrored reminder, with no far side to
 keep house on.
 
-WARNING: That state lives on the **far** machine, in the **landing account's** home, and
+⚠ That state lives on the **far** machine, in the **landing account's** home, and
 carries the session id in its name - so it is per session **and** per host **and**
 per account. Switching `@web-01 -> @web-02` inside one session carries no directory
 over: the second host reads its own state file, which does not exist yet, so the
@@ -412,7 +412,7 @@ argument, because its name has to stay predictable to be reused between calls, s
 it lives in a private per-user directory instead; see the control-socket entry
 above.
 
-WARNING: **The CLI does not read that state at all** - `ssh_argv()` carries no `cd`, so
+⚠ **The CLI does not read that state at all** - `ssh_argv()` carries no `cd`, so
 every `shunt run` / `read` / `edit` / `get` starts in the ssh **login** directory
 (usually `$HOME`), not where the session last `cd`-ed. Give the CLI absolute paths,
 and read `get`'s default destination `.` as that login directory. Also a known
@@ -515,7 +515,7 @@ so a long job **survives the ssh disconnect** and its exit code is preserved for
 later `--status` inspection (which shows the last 60 journal lines plus
 `ExecMainStatus` / `ExecMainCode` / `Result` / `SubState`). An optional `--name`
 slugifies into a readable unit name (`shunt-<label>`); otherwise a random one is
-generated. WARNING: The units are **system-level** - no `--user`, no `sudo` - so the ssh
+generated. ⚠ The units are **system-level** - no `--user`, no `sudo` - so the ssh
 user must be allowed to create system units, which in practice means root on that
 host. Without that right, `bg` fails; nothing else in shunt needs it.
 
@@ -603,7 +603,7 @@ does not deploy a file that was never edited; a transport failure keeps ssh's ow
 code, which says more than a generic `1`. As a line of its own, though: while the
 session is routed to a host, a `shunt ...` line carrying `&&` runs nothing.
 
-WARNING: The atomic replace swaps the file's inode. If the edited path is on an NFS
+⚠ The atomic replace swaps the file's inode. If the edited path is on an NFS
 mount, another client holding an open handle to the old inode can see `ESTALE`.
 Ordinary local filesystems are unaffected.
 
@@ -647,7 +647,7 @@ line (`CONFLICT` / `SKIP`) and sets a non-zero exit code, but the remaining file
 are still pushed. A manifest entry outliving its host is ordinary rather than
 exceptional, and one stale entry must not abandon everything queued behind it.
 
-WARNING: Asymmetric size guard: `SHUNT_EDIT_MAX_BYTES` (default 64 MiB) is read by the
+⚠ Asymmetric size guard: `SHUNT_EDIT_MAX_BYTES` (default 64 MiB) is read by the
 helpers **on the far host**, so a value exported locally never reaches it - ssh
 carries no environment. The two helpers measure different things: for
 `shunt edit` it is the **remote file being opened** (`st_size`), for
@@ -676,7 +676,7 @@ the environment they actually meet. Measured on real hosts rather than assumed:
 **The floor is written down, not inherited.** `MIN_PYTHON = (3, 3)` stands in the
 first lines of both helpers. The number is measured against the code they contain:
 `os.replace` - the atomic rename both stand on - is new in 3.3; the next newest is
-`os.makedirs(exist_ok=)` at 3.2; everything else is 2.x-era stdlib. WARNING: The CLI needs
+`os.makedirs(exist_ok=)` at 3.2; everything else is 2.x-era stdlib. ⚠ The CLI needs
 **3.11** for `tomllib`, and that does **not** apply on the far side: hosts in that
 range fall below it, and an inherited floor would have cut off every one.
 
@@ -690,7 +690,7 @@ byte-identical in both helpers, which a test enforces: they cannot import one
 another - nothing of shunt's exists over there - so a test is what holds them
 together.
 
-WARNING: **A runtime guard can only catch APIs.** Syntax from the future is a `SyntaxError`
+⚠ **A runtime guard can only catch APIs.** Syntax from the future is a `SyntaxError`
 at COMPILE time - the whole file, before its first line runs - and then the guard
 never speaks at all. So the floor has a second half in the tests: both helpers must
 stay PARSEABLE at `MIN_PYTHON`, and that takes three mechanisms, because none is
@@ -700,7 +700,7 @@ numeric underscores and positional-only parameters - and, on 3.12+, accepts an f
 way the node scan is what makes the check version-independent: a scan by AST node type
 catches the f-string - and misses PEP 448 (`{**a}`, `[*a]`,
 `f(*a, *b)`, `f(**a, **b)`) and PEP 614 (`@a[0].b`), which are new SHAPES of old
-nodes. A third scan, by shape, catches those. WARNING: One blind spot remains for all
+nodes. A third scan, by shape, catches those. ⚠ One blind spot remains for all
 three and is named rather than left to be found: parentheses around several context
 managers (3.9) are invisible to every one of them.
 -> This is why the two helpers are the one place in this package that does **not**

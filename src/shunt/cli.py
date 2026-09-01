@@ -26,7 +26,7 @@ shunt CLI (this file) = the special operations:
   shunt commit  [<local_path>]             push edited local file(s) back to remote (conflict-safe)
   shunt commit  --abandon <local_path>     drop manifest entry without pushing
 
-WARNING: Every subcommand starts in the ssh LOGIN directory (usually $HOME). The per-session
+⚠ Every subcommand starts in the ssh LOGIN directory (usually $HOME). The per-session
 `cwd` the hook remembers for @host mode lives in a remote state file that only the hook
 reads and writes - the CLI does not share it. So give `run`/`read`/`edit` absolute paths,
 and read `get`'s default destination `.` as that login directory, not as wherever the
@@ -153,7 +153,7 @@ def control_path():
     What a failed mkdir costs is connection REUSE, not the command, and the only moment to
     report it would be before every single CLI call.
 
-    WARNING: Length. ssh expands %r/%h/%p and then REFUSES a path that does not fit a unix socket -
+    ⚠ Length. ssh expands %r/%h/%p and then REFUSES a path that does not fit a unix socket -
     "ControlPath too long ... >= 108 bytes", exit 255, no connection attempted: fatal, not a
     fallback. Measured: 107 bytes is the longest path that binds on Linux, macOS allows 103.
     The move spent ~18 bytes against /tmp, and a destination of ordinary size - a six-letter
@@ -602,7 +602,7 @@ def _print_hook_hint():
     pretool.py). Print the narrow one and a fresh install silently loses those warnings -
     which is how this was found: one setup only had them because a human had widened it by
     hand.
-    WARNING: Not "only Bash is ever rewritten", which this line said until the note into a spawned
+    ⚠ Not "only Bash is ever rewritten", which this line said until the note into a spawned
     agent's prompt made it false: an Agent call is handed back rewritten too, with the note
     appended to the child's prompt. A comment is read far more often than a manual, so the
     stale one was teaching the wrong thing to everyone who opened the file.

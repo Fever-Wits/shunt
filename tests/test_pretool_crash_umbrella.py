@@ -26,7 +26,7 @@ answer their own blindness - by WHO can still repair the hook.
   tool unknown    -> BLOCKED, all of it. A crash before `tool_name` was read cannot tell a
                     bash command from a file read.
 
-WARNING: These tests run the hook IN-PROCESS. Everything else in this suite spawns it the way the
+⚠ These tests run the hook IN-PROCESS. Everything else in this suite spawns it the way the
 harness does, and should; an injected failure cannot cross that boundary - and no input or
 filesystem shape reaches these paths, which was verified before the roof was written (a
 config dir that cannot be written to, a session id with a NUL byte, a non-dict tool_input:

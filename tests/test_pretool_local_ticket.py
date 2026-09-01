@@ -36,7 +36,7 @@ Coverage:
   - each of the three silent writes above, said with the path and the reason
   - and the other direction for each, so none of it can pass on a hook that just complains
 
-WARNING: SHUNT_CONF is a temp directory in every test, and the stub `ssh` means no switch here
+⚠ SHUNT_CONF is a temp directory in every test, and the stub `ssh` means no switch here
 opens a connection.
 """
 

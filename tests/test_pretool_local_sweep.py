@@ -7,7 +7,7 @@ never dies, so `~/.config/shunt/` kept `active-host.<sid>` - `warned.<sid>` -
 `switched.<sid>` for every session that ever went remote, for as long as the machine lives
 - the same class of leak, already solved on one side and left standing on the other.
 
-WARNING: The interesting part is what is NOT swept. `target.<sid>` is written ONCE, at the switch,
+⚠ The interesting part is what is NOT swept. `target.<sid>` is written ONCE, at the switch,
 and never touched again, so an old mtime there does not mean a dead session - it means a
 session that switched a while ago and may well still be working. Sweeping it would answer
 that session's next command with "never switched" and run it HERE: the silent fall to the

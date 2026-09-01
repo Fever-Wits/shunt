@@ -43,7 +43,7 @@ import tempfile
 # stdlib, so none can fail on an interpreter this guard is meant to catch. Keeping them
 # there is also what keeps the file free of a lint exception nobody else in this tree has.
 #
-# WARNING: A runtime guard can only catch APIs. SYNTAX from the future is a SyntaxError at
+# ⚠ A runtime guard can only catch APIs. SYNTAX from the future is a SyntaxError at
 # COMPILE time - the whole file, before line one runs - and then this never speaks at all.
 # So the floor has a second half, and it lives in the tests: both helpers must stay
 # PARSEABLE at MIN_PYTHON (tests/test_helpers_far_side.py). Write an f-string in here

@@ -7,9 +7,11 @@ and this project adheres to [CalVer](https://calver.org/) (`YYYYMMDDHH`).
 
 ## [2026090112] - 2026-09-01
 
-One theme. **A justification outliving the design it was written for** - the comments and
+Two themes. **A justification outliving the design it was written for** - the comments and
 the public docs described the environment the rewritten command runs in, a description
-written for a transport that is gone.
+written for a transport that is gone. And **a diagnosis that named the wrong machine** - a
+host name long enough to overflow ssh's connection-reuse socket made ssh refuse the
+connection outright, and the failure read as the host being down.
 
 ### Changed
 
@@ -23,6 +25,20 @@ written for a transport that is gone.
   state nothing about what that environment permits - shunt does not depend on the answer.
   Behaviour is unchanged.
 
+### Fixed
+
+- **A long host name no longer misdiagnoses as an unreachable machine.** The socket that
+  makes ssh's connection reuse possible is a file, and a unix socket path has a hard limit
+  - 103 bytes on macOS, 107 on Linux - built from `/tmp/shunt-cm-` + the 36-byte session id
+  + `user@host:port` + `.sock`. A host name long enough to exceed it made ssh refuse the
+  connection outright (exit 255, nothing attempted), and the transport epilogue then read
+  that as "`@alias` is down or unreachable" - a diagnosis for a machine that was never
+  asked. The switch now measures the path itself and, past the limit, says the true cause
+  instead: use the IP in place of the long name, or set `control_master = false` for that
+  host in `shunt.toml` - every command then runs there without connection reuse (each pays
+  its own ssh handshake, roughly 25x slower on repeats). Default is `true`; nothing changes
+  for a host whose path already fits.
+
 ## [2026083009] - 2026-08-30
 
 Two themes. **A tool that states only what it has verified** - a refusal naming a
@@ -30,11 +46,11 @@ separator that was not one, a fuse that emptied the log it protects, an audit li
 session id could split, a check whose docstring promised more than it did. And **code
 that runs on a machine nobody chose** - the two file helpers execute with the *server's*
 `python3`, and real hosts answered in five different minor versions.
-Entries that change behaviour you may have relied on are marked WARNING:.
+Entries that change behaviour you may have relied on are marked ⚠.
 
 ### Fixed
 
-- **WARNING: `shunt ...` lines with a shell variable are no longer refused.** In remote mode the
+- **⚠ `shunt ...` lines with a shell variable are no longer refused.** In remote mode the
   guard that keeps `shunt` commands on the local machine treated a bare `$` as a place a
   second command could begin. It cannot: `$VAR` is an expansion, and no shell re-splits a
   command at a `;` that arrived out of one. So `shunt read @h "$f"` and
@@ -42,28 +58,28 @@ Entries that change behaviour you may have relied on are marked WARNING:.
   `$`" would run here, which was not true of the line in front of it. Command substitution
   is now spelled out (`$(`) so it can still be *named* in the refusal; `(` caught it either
   way.
-- **WARNING: Line numbers for `shunt read` are ASCII digits, and nothing else.** The range was
+- **⚠ Line numbers for `shunt read` are ASCII digits, and nothing else.** The range was
   handed straight to `int()`, which accepts far more than anyone asked for: `-5:9`,
   `" 7 ":9`, `1_0:20`, `+8:9` and every Unicode decimal (`U+0663:U+0664`) all reached the remote
   `awk`. The contract is now written in the guard rather than inherited from Python's
   character table; those five shapes get a usage refusal.
-- **WARNING: A flag without its value refuses instead of crashing.** `shunt edit ... --expected`
+- **⚠ A flag without its value refuses instead of crashing.** `shunt edit ... --expected`
   with nothing after it, `--expected abc`, and `shunt install ... --alias` / `--key` at the
   end of a line each left a raw Python traceback in front of the caller. They now answer
   with a usage line, through the same one place that already refused for `bg --name` and
   `log -n` - and each hand keeps its own wording.
-- **WARNING: The audit log cannot be split by a session id or a host alias.** Only the command was
+- **⚠ The audit log cannot be split by a session id or a host alias.** Only the command was
   folded onto one line; the other two fields reached the record raw, and a newline in
   either broke the one-record-one-line equality that `shunt log -n N` and the trimmer both
   count on.
 - **The trimmer can no longer empty the log.** When a single record was larger than the
   whole ceiling, the size cut walked back from the end, found nothing that fit, and left an
   empty slice - the fuse burning the thing it protects. It now keeps the newest record.
-- **WARNING: `shunt commit` reports a write it could not verify.** A verify-read that failed came
+- **⚠ `shunt commit` reports a write it could not verify.** A verify-read that failed came
   back without `verified`, so a caller testing that one field got `None` from a helper that
   had just failed to prove anything: falsy by accident, which reads the same as falsy by
   answer until someone asks `is False`.
-- **WARNING: Malformed helper requests answer in JSON instead of tracebacks - or wrong results.**
+- **⚠ Malformed helper requests answer in JSON instead of tracebacks - or wrong results.**
   On the `shunt edit --stdin` path the JSON belongs to the caller, and several fields were
   read outside any guard. Two classes: a non-numeric `expected` or a non-string `file` /
   `old` raised a traceback on the far machine; worse, `base_sha: 7` was truthy and unequal
@@ -78,7 +94,7 @@ Entries that change behaviour you may have relied on are marked WARNING:.
 
 ### Added
 
-- **WARNING: The file helpers say what python they need.** They are shipped as source and executed
+- **⚠ The file helpers say what python they need.** They are shipped as source and executed
   by the *server's* `python3`; measured on real hosts rather than assumed: **3.7 to
   3.13** - five minor versions, none of them chosen by the tool. `MIN_PYTHON = (3, 3)` is
   now declared in the first lines of both - measured against the code they contain
@@ -89,7 +105,7 @@ Entries that change behaviour you may have relied on are marked WARNING:.
   'replace'` - which sends a reader looking for a bug in shunt rather than at an old
   server. -> These two files are the one place in the package that avoids f-strings: an
   f-string in either would raise the real floor to 3.6 and make the guard unreachable.
-- **WARNING: `shunt install` asks which `python3` the server has,** prints it, and says plainly
+- **⚠ `shunt install` asks which `python3` the server has,** prints it, and says plainly
   when it is below the helpers' floor - without refusing the registration. A host with no
   `python3` at all (exit 127) is likewise reached, reported and registered: the helpers are
   two subcommands out of eleven, and refusing would trade a whole machine for one feature.
@@ -119,11 +135,11 @@ One theme: **the tool answering for something it did not do.** Places where a fa
 no voice - a hook that died, a command re-split on the way out, a pull that ate the work it
 was asked to refresh, writes that reported the wrong thing about themselves, a warning that
 looked at the wrong word, and a socket that trusted a directory anyone can write to.
-Entries that change behaviour you may have relied on are marked WARNING:.
+Entries that change behaviour you may have relied on are marked ⚠.
 
 ### Security
 
-- **The CLI's ControlMaster socket left `/tmp`.** WARNING: **Behaviour change for anyone already
+- **The CLI's ControlMaster socket left `/tmp`.** ⚠ **Behaviour change for anyone already
   running shunt** - see *What you will notice* below. It was
   `/tmp/shunt-cm-cli-%r@%h:%p.sock`: a name anybody can work out, in a directory anybody can
   write to. `%r` is the *remote* account, so nothing in that name belongs to the local user
@@ -154,7 +170,7 @@ Entries that change behaviour you may have relied on are marked WARNING:.
 
 ### Added
 
-- **A crash in the hook now stops the command instead of releasing it.** WARNING: **Behaviour
+- **A crash in the hook now stops the command instead of releasing it.** ⚠ **Behaviour
   change.** A hook that raises exits non-zero-but-not-2, and the harness reads that as a
   **non-blocking** error: it prints the message and runs your **original** command. On a
   session routed to a server that is `rm -rf /srv/old`, written for the far machine,
@@ -180,7 +196,7 @@ Entries that change behaviour you may have relied on are marked WARNING:.
   Deliberate answers (a rewrite, a refusal, a switch, the unreadable-input denial) leave
   through `SystemExit` and are untouched.
 
-- **`shunt checkout` refuses to overwrite local edits.** WARNING: **Behaviour change.** A
+- **`shunt checkout` refuses to overwrite local edits.** ⚠ **Behaviour change.** A
   re-checkout replaced the local file whole. When that file held uncommitted work, the work
   was gone - no undo, no second copy - and the path in was the tool's own advice: `commit`
   on a moved remote printed *"re-checkout to pick up remote changes, then re-apply your
@@ -250,7 +266,7 @@ Entries that change behaviour you may have relied on are marked WARNING:.
   paths, neither of them the one that was typed, on the hand that runs with nobody watching
   the screen and does not come back to be corrected. It now assembles the command exactly
   as `shunt run` does: one argument verbatim (pipes and redirects intact), several
-  re-quoted. Quoting the whole command as one argument worked before and still works. WARNING: The
+  re-quoted. Quoting the whole command as one argument worked before and still works. ⚠ The
   README documented the old behaviour explicitly; that paragraph is corrected.
 - **`shunt bg @host --name LABEL` with no command left is refused.** `--name` is stripped
   out of the command, so a line that was nothing but the flag joined to `""` and started a
@@ -279,11 +295,11 @@ One theme again, one step further in: **shunt refusing to answer from something 
 read.** The previous release taught it to say which machine you are standing on; this one
 covers the cases where it cannot tell - a hook input that arrives broken, a systemd unit
 that does not exist, a line whose second half cannot run where the first half is going.
-Two entries change behaviour you may have relied on; both are marked WARNING:.
+Two entries change behaviour you may have relied on; both are marked ⚠.
 
 ### Added
 
-- **The hook now has an answer for an input it cannot read.** WARNING: **Behaviour change.**
+- **The hook now has an answer for an input it cannot read.** ⚠ **Behaviour change.**
   Everything this hook decides comes out of the JSON the harness hands it, and an
   unreadable one used to mean silence - after which the harness ran your **original**
   command. On a session routed to a server, that is the accident the whole tool exists to
@@ -347,7 +363,7 @@ Two entries change behaviour you may have relied on; both are marked WARNING:.
 
 ### Fixed
 
-- **A rewritten command keeps the rest of your request.** WARNING: **Behaviour change, in your
+- **A rewritten command keeps the rest of your request.** ⚠ **Behaviour change, in your
   favour.** The hook handed the harness only the rewritten `command`, and measurement
   showed the other fields did not survive the trip: a Bash call carrying
   `run_in_background: true` and `timeout: 600000` came back in the **foreground**, with the
@@ -371,11 +387,11 @@ Two entries change behaviour you may have relied on; both are marked WARNING:.
 One theme: shunt saying **which machine you are standing on - before the command, not
 after it.** One entry is the exception that proves the rule: when the transport itself
 fails there is nothing to say beforehand, so it is said after. Two entries change timing
-or an exit code you may have relied on; each is marked WARNING:.
+or an exit code you may have relied on; each is marked ⚠.
 
 ### Added
 
-- **`@<alias>` now asks the machine whether it answers.** WARNING: **Behaviour change** - the
+- **`@<alias>` now asks the machine whether it answers.** ⚠ **Behaviour change** - the
   switch used to be pure bookkeeping and returned in milliseconds; it now waits for a real
   ssh handshake, about **3 seconds** against a host that is not there (5 in the worst
   case). What you see when it works:
@@ -466,7 +482,7 @@ or an exit code you may have relied on; each is marked WARNING:.
 
 ### Fixed
 
-- **`shunt bg @host --list` now reports a listing that could not be made.** WARNING: **Behaviour
+- **`shunt bg @host --list` now reports a listing that could not be made.** ⚠ **Behaviour
   change** for anything reading its exit code. The command ended in `|| true`: a far side
   with no systemd, no permission, or a bad invocation came back **exit 0 with no output** -
   indistinguishable from "this host has no jobs". `systemctl list-units` already exits 0
@@ -503,7 +519,7 @@ or an exit code you may have relied on; each is marked WARNING:.
 
 Most of this release is the hook learning to say **where a command actually went** - and
 refusing when it cannot say. Several things that used to happen in silence are now loud,
-and six of them change behaviour you may have relied on; each is marked WARNING:. Two ask
+and six of them change behaviour you may have relied on; each is marked ⚠. Two ask
 something of you: the session's remote working directory moves and **is not migrated**,
 and a `shunt ...` line with a `;` in it is refused while the session is remote. Scripts
 reading exit codes should read the entries for `bg --stop`, the checkout manifest, `log
@@ -513,7 +529,7 @@ reading exit codes should read the entries for `bg --stop`, the checkout manifes
 
 - **The session's remote working directory is remembered in
   `$HOME/.cache/shunt/cwd-<session-id>`** on the far host, no longer
-  `/tmp/shunt-cwd-<session-id>`. WARNING: **Behaviour change**, and **nothing is migrated**: the
+  `/tmp/shunt-cwd-<session-id>`. ⚠ **Behaviour change**, and **nothing is migrated**: the
   first command after upgrading starts in the ssh login directory (usually `$HOME`)
   instead of where you left off - once per session, per host, per account. `cd` again and
   the new file takes over. It happens without a message, because a missing state file is
@@ -545,7 +561,7 @@ reading exit codes should read the entries for `bg --stop`, the checkout manifes
   `>` that truncates a file, now arrives with a line naming the machine:
 
   ```
-  WARNING: shunt: you are on @web-01 - this runs THERE and cannot be taken back: git ... --hard,
+  ⚠ shunt: you are on @web-01 - this runs THERE and cannot be taken back: git ... --hard,
   docker ... rm. Check which machine you meant; `@local` first if it is this one.
   ```
 
@@ -579,7 +595,7 @@ reading exit codes should read the entries for `bg --stop`, the checkout manifes
 
 ### Fixed
 
-- **A `shunt ...` line with something after it is refused while the session is remote.** WARNING:
+- **A `shunt ...` line with something after it is refused while the session is remote.** ⚠
   **Behaviour change.** `shunt ...` runs on *this* machine - that is what it is for - but so
   did everything past the `;`, and that part never asked to. On a session routed to a
   server, `shunt hosts; rm -rf /var/log/*` deleted the **local** log directory without a
@@ -595,7 +611,7 @@ reading exit codes should read the entries for `bg --stop`, the checkout manifes
   A plain redirect is not in the class, so `shunt read @host /etc/nginx.conf > local.txt`
   still works.
 
-- **A routing file that cannot be read is refused, not read as "local".** WARNING: **Behaviour
+- **A routing file that cannot be read is refused, not read as "local".** ⚠ **Behaviour
   change.** `target.<session-id>` had two readings - a host, or nothing - and a file that
   was empty, truncated, a directory or unreadable counted as *nothing*, which means
   **local**. A session that had been routed away therefore came home without saying so,
@@ -621,13 +637,13 @@ reading exit codes should read the entries for `bg --stop`, the checkout manifes
   STILL on @web-01. Fix that and try `@web-02` again.
   ```
 
-  WARNING: The atomic write brings one new failure mode: switching now needs a **writable config
+  ⚠ The atomic write brings one new failure mode: switching now needs a **writable config
   directory**, not merely a writable file, because the temporary file is created beside the
   target. It fails loudly, in the shape above. On the other side, an *empty* directory
   sitting where `target.<session-id>` belongs is now removed rather than being a trap with
   no way out - bash refused, and `@local` was powerless to lift it.
 
-- **`shunt bg --stop` reports what systemd actually did.** WARNING: **Behaviour change** for
+- **`shunt bg --stop` reports what systemd actually did.** ⚠ **Behaviour change** for
   anything reading its exit code. The stop and the `echo` were joined by `;`, so `stopped`
   was printed and `0` returned no matter what happened - a mistyped unit name answered
   exactly like a real one while the job kept running. `stopped <job>` is now printed only
@@ -635,7 +651,7 @@ reading exit codes should read the entries for `bg --stop`, the checkout manifes
   job twice is one of those failures: `systemd-run --collect` discards the unit when it
   ends, so the second `--stop` gets `Unit ... not loaded.` and exit **5**.
 
-- **A checkout manifest that cannot be read stops the operation.** WARNING: **Behaviour change.**
+- **A checkout manifest that cannot be read stops the operation.** ⚠ **Behaviour change.**
   Every read of it caught every exception and returned an empty manifest - and an empty
   manifest means "nothing is checked out" further down. So a corrupt file made `checkout
   --list` print `(no checkouts)`, and `commit` say `no checkouts in manifest` and exit
@@ -660,7 +676,7 @@ reading exit codes should read the entries for `bg --stop`, the checkout manifes
   it had left alone. It is read before anything is fetched: the file, the manifest and the
   absence of a stray `.part` beside it are all left exactly as they were.
 
-- **`shunt log -n` and `shunt bg --name` refuse a value they cannot use.** WARNING: **Behaviour
+- **`shunt log -n` and `shunt bg --name` refuse a value they cannot use.** ⚠ **Behaviour
   change**; both exit `2` and do nothing. An unparseable `-n` was swallowed and fell back
   to **50** records - and fifty records look like a complete answer, which is how someone
   concludes that a command was never sent to a server at all. `--name` with no label left
@@ -720,7 +736,7 @@ machines. Two of them change behaviour you may have relied on; both are called o
   `not_found` instead of a guess; for latin-1 **text**, use `checkout`/`commit`, which
   never decode.
 
-- **A session routed to a host that no longer resolves now runs nothing.** WARNING: **Behaviour
+- **A session routed to a host that no longer resolves now runs nothing.** ⚠ **Behaviour
   change.** Previously a renamed alias or a broken `shunt.toml` made the hook fall back to
   running the command **locally** - while `@status` still said REMOTE. A `rm -rf
   /var/log/*` meant for a server deleted the local one. The hook cannot raise (a traceback
@@ -735,7 +751,7 @@ machines. Two of them change behaviour you may have relied on; both are called o
   pull now lands in a `.part` file beside the target and is moved into place only on
   success.
 
-- **`shunt edit` exits non-zero when the edit did not happen.** WARNING: **Behaviour change** for
+- **`shunt edit` exits non-zero when the edit did not happen.** ⚠ **Behaviour change** for
   anything reading its exit code. The helper answers in JSON and always exits 0 -
   `not_found`, `ambiguous` and `conflict` included - and the CLI passed ssh's code straight
   back, so `shunt edit ... && deploy` deployed an unedited file. The code now follows the

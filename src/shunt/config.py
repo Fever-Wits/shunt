@@ -11,9 +11,11 @@ shunt - config.py - the hosts, read (and written) in ONE place.
     special = { target = "user@203.0.113.30", key = "~/.ssh/another_key" }
 
 A bare string IS the target; the inline table adds a per-host `key`, which wins over the
-top-level default. Everything a host needs lives here on purpose: an address split between
-this file and ~/.ssh/config breaks silently when only one side is edited - machines added
-on one side, the identity left on the other, and access is gone without a word.
+top-level default, and an optional `control_master` (default true) - see shunt.toml.example
+for what turning it off buys and costs. Everything a host needs lives here on purpose: an
+address split between this file and ~/.ssh/config breaks silently when only one side is
+edited - machines added on one side, the identity left on the other, and access is gone
+without a word.
 
 Legacy: with no shunt.toml the old `hosts` file (`<alias> ssh <target> [key=PATH]`) is still
 read, so an existing setup keeps working; a notice on stderr says where the new place is.
@@ -132,8 +134,13 @@ def add_host(conf_dir, alias, target, key=None):
 # -- reading -------------------------------------------------------------------
 
 
-def _host(alias, target, key):
-    return {"alias": alias, "target": target, "key": os.path.expanduser(key) if key else None}
+def _host(alias, target, key, control_master=True):
+    return {
+        "alias": alias,
+        "target": target,
+        "key": os.path.expanduser(key) if key else None,
+        "control_master": control_master,
+    }
 
 
 def _load_toml(path):
@@ -143,16 +150,18 @@ def _load_toml(path):
     hosts = {}
     for alias, entry in (data.get("hosts") or {}).items():
         if isinstance(entry, str):
-            target, key = entry, default_key
+            target, key, control_master = entry, default_key, True
         elif isinstance(entry, dict):
-            target, key = entry.get("target"), entry.get("key", default_key)
+            target = entry.get("target")
+            key = entry.get("key", default_key)
+            control_master = entry.get("control_master", True)
         else:
-            target, key = None, None
+            target, key, control_master = None, None, True
         if not target:
             raise ValueError(
                 f'{path}: host "{alias}" must be "user@host" or {{ target = "user@host", key = "~/.ssh/id" }}'
             )
-        hosts[alias] = _host(alias, target, key)
+        hosts[alias] = _host(alias, target, key, control_master)
     return hosts
 
 
